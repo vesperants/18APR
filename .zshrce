@@ -14,4 +14,3 @@ if [ -f '/Users/sirishjoshi/Desktop/Project/Archive/google-cloud-sdk/path.zsh.in
 
 # The next line enables shell command completion for gcloud.
 if [ -f '/Users/sirishjoshi/Desktop/Project/Archive/google-cloud-sdk/completion.zsh.inc' ]; then . '/Users/sirishjoshi/Desktop/Project/Archive/google-cloud-sdk/completion.zsh.inc'; fi
-export OPENAI_API_KEY="put the key later on"
