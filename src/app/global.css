@@ -1,0 +1,194 @@
+/* --- Styles for Back Button and Header --- */
+
+.page-header {
+  display: flex;
+  align-items: center; /* Vertically center button and title */
+  gap: 15px; /* Space between button and title */
+  margin-bottom: 25px; /* Space below the header area */
+  width: 100%; /* Ensure it takes full width */
+}
+
+.back-button {
+  display: inline-flex; /* Use inline-flex for alignment */
+  align-items: center;
+  justify-content: center;
+  background-color: #4CAF50; /* Green */
+  color: white;
+  padding: 8px 15px;
+  border: none;
+  border-radius: 5px;
+  text-decoration: none; /* Remove underline from link */
+  font-size: 1.3em; /* Adjust size of the arrow */
+  font-weight: bold;
+  line-height: 1; /* Prevent extra vertical space */
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+  flex-shrink: 0; /* Prevent the button from shrinking */
+}
+
+.back-button:hover {
+  background-color: #45a049; /* Darker green on hover */
+}
+
+.page-title {
+  /* Adjust title margin if needed, default h1 margins might interfere */
+  margin: 0;
+  /* You might want to ensure the title doesn't wrap awkwardly */
+  flex-grow: 1; /* Allow title to take remaining space if needed */
+  text-align: center; /* Optional: center title if button is on left */
+  /* If you want title strictly next to button, remove text-align: center */
+}
+
+/* Adjust container padding if necessary */
+/* .container { */
+  /* Example: Adjust top padding if header feels too close to edge */
+  /* padding-top: 30px; */
+/* } */
+
+/* Ensure h1 doesn't have excessive margin pushing things down */
+h1.page-title {
+    margin-top: 0;
+    margin-bottom: 0;
+}
+
+
+/* Optimized CSS with Baloo 2 Font, Instant Close, Fused Date Picker, Button Effects, Small NeKaPa Fields, and List Width Control */
+
+body {
+  margin: 0;
+  padding: 0;
+  background: #f2f2f2;
+  font-family: "Baloo 2", sans-serif;
+  font-weight: 400;
+  font-optical-sizing: auto;
+  font-size: 16px; /* Base font size */
+  color: #333;
+}
+
+.container {
+  max-width: 950px;
+  margin: 20px auto;
+  padding: 30px;
+  background-color: #fff;
+  border-radius: 15px;
+  box-shadow: 0 5px 15px rgba(0,0,0,.1);
+}
+
+/* --- Add this new rule for the narrower login container --- */
+.container.container--narrow {
+  max-width: 400px; /* Specific narrower width for login */
+}
+
+/* Style for the added page title */
+.page-title {
+  text-align: center;
+  font-size: 1.5em; /* Adjust size as needed */
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 25px; /* Creates space below the title, before the grid starts */
+}
+
+/* Grid layout helper (Used to space the rows) */
+.grid {
+  display: grid;
+  row-gap: 25px; /* This existing rule now provides space between rows */
+}
+
+/* Grid layout helper (if used consistently) */
+.grid {
+  display: grid;
+  row-gap: 25px;
+}
+
+/* Standard 3-column row */
+.row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  column-gap: 30px;
+  align-items: end; /* Align items to the bottom */
+}
+
+/* Special 2-column row */
+.row-two-col {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  column-gap: 30px;
+  align-items: end;
+}
+
+/* Style for field labels */
+.field-label {
+  display: block;
+  margin-bottom: 8px; /* Original spacing */
+  font-weight: 600;
+  font-size: 0.95em;
+  color: #555;
+}
+
+/* Base styles for input fields (grouped for efficiency) */
+.search-box,
+.small-input {
+  display: flex; /* Use flexbox for alignment */
+  align-items: center; /* Vertically center content */
+  height: 40px;
+  width: 100%;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.1);
+  outline: 0;
+  box-sizing: border-box; /* Include padding and border in element's total width and height */
+  font-family: inherit; /* Use body font */
+  font-size: 1em; /* Use body font size */
+  transition: border-color .2s ease, box-shadow .2s ease;
+}
+
+/* Padding for text inputs */
+.search-box,
+.small-input {
+  padding: 0 12px;
+}
+
+/* Specific style for the small 'Bhag' input */
+.small-input {
+  width: 70px;
+  text-align: center;
+  flex-shrink: 0; /* Prevent shrinking in flex layouts */
+}
+
+/* === Button Styles === */
+.button-container {
+    display: flex;
+    justify-content: center; /* Center buttons horizontally */
+    gap: 20px; /* Space between buttons */
+    margin-top: 30px; /* Space above buttons */
+}
+.button {
+  display: inline-block; /* Correct display type for buttons */
+  border: none;
+  color: #fff;
+  background-color: #0056b3; /* Default search button color */
+  border-radius: 8px;
+  padding: 10px 25px;
+  font-size: 1em;
+  font-family: inherit;
+  font-weight: 600;
+  text-align: center; /* Ensure text is centered */
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0,0,0,.15);
+  transition: background-color .2s ease, box-shadow .15s ease, transform .15s ease;
+  transform: translateY(0);
+}
+.button:hover {
+    box-shadow: 0 4px 8px rgba(0,0,0,.2);
+    transform: translateY(-2px); /* Slight lift effect */
+}
+.button:active {
+    box-shadow: 0 1px 2px rgba(0,0,0,.2);
+    transform: translateY(1px); /* Slight press effect */
+}
+/* Specific button colors */
+.button-search { background-color: #0056b3; }
+.button-search:hover { background-color: #004494; }
+.button-clear { background-color: #28a745; }
+.button-clear:hover { background-color: #218838; }

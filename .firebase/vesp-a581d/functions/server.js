@@ -1,0 +1,4 @@
+const { onRequest } = require('firebase-functions/v2/https');
+  const server = import('firebase-frameworks');
+  exports.ssrvespa581d = onRequest({"region":"us-central1","predeploy":["echo 'Frameworks Predeploy Hook: Starting...'","echo 'Frameworks Predeploy Hook: Creating target directory .firebase/vesp-a581d/functions/src if needed...'","mkdir -p .firebase/vesp-a581d/functions/src","echo 'Frameworks Predeploy Hook: Copying local src/Law_json_files to staging directory...'","cp -R src/Law_json_files .firebase/vesp-a581d/functions/src/","echo 'Frameworks Predeploy Hook: Copy complete.'"]}, (req, res) => server.then(it => it.handle(req, res)));
+  

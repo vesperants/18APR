@@ -1,0 +1,45 @@
+/* src/components/ChatInputArea.module.css */
+
+/* Wrapper for the form itself, containing textarea and buttons */
+.inputForm {
+  display: flex;
+  width: 100%;
+  align-items: center; /* Vertically align items */
+  padding: 0 8px; /* Add horizontal padding */
+}
+
+/* Wrapper around the textarea */
+.textareaWrapper {
+  flex: 1; /* Allow textarea to grow */
+  margin: 6px 0; /* Vertical margin */
+  position: relative; /* If needed for future elements */
+  display: flex; /* Ensure alignment if other elements are added inside */
+  align-items: center;
+}
+
+/* Base styles for the textarea are in chat.module.css (styles.textareaBase) */
+/* We add specific overrides or states here */
+.textareaInput {
+  /* Default border-radius (no files selected) */
+  border-radius: 26px;
+}
+
+.textareaInputWithFiles {
+  /* Border-radius when files are selected (top corners sharp) */
+  border-radius: 0 0 26px 26px;
+}
+
+/* Hidden file input */
+.hiddenFileInput {
+  display: none;
+}
+
+/* Attachment button positioning (base icon styles in chat.module.css) */
+.attachmentButton {
+  /* Override position if needed, assuming base styles handle most */
+  /* Example: If base styles didn't include positioning */
+  /* Removed absolute positioning as the container now handles it */
+  /* position: absolute; */
+  /* right: 56px; */
+  /* Keep other styles like background, border from styles.iconButton */
+} 

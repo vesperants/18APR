@@ -1,0 +1,151 @@
+/* ChatShelf.module.css */
+/* ---------- OVERLAY ---------- */
+.shelfBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(25, 25, 34, 0.10);
+  z-index: 10000;
+  transition: background 0.18s;
+  }
+  .shelfBackdropHidden {
+  pointer-events: none;
+  opacity: 0;
+  background: transparent;
+  }
+  /* ---------- CONTAINER ---------- */
+  .shelfContainer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 350px;
+  max-width: 92vw;
+  height: 100%;
+  background: #fff;
+  border-radius: 0 28px 28px 0 / 0 36px 36px 0;
+  box-shadow: 0 6px 32px 0 rgba(40, 48, 74, 0.13),
+  0 1.5px 5px 0 rgba(60, 56, 82, 0.07);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: slideInLeft 0.22s cubic-bezier(.71,.15,.54,1.08);
+  }
+  @keyframes slideInLeft {
+   from { opacity: 0; transform: translateX(-50px) scale(0.97); }
+   to { opacity: 1; transform: none; }
+  }
+  /* ---------- HEADER ---------- */
+  .shelfHeader {
+  display: flex;
+  align-items: center;
+  height: 74px;
+  border-bottom: 1px solid #ececec;
+  background: #fafbfc;
+  padding: 0 50px;
+  flex-shrink: 0;
+  }
+  .shelfHeaderTitle {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #2f3037;
+  margin: 0;
+  letter-spacing: -0.006em;
+  }
+  /* ---------- CONTENT ---------- */
+  .shelfContent {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 18px 0 20px;
+  min-height: 0;
+  background: #fff;
+  }
+  .emptyMsg {
+  opacity: 0.6;
+  padding: 33px 22px 10px;
+  text-align: center;
+  font-size: 1.06rem;
+  }
+  /* ---------- CONVERSATION LIST ---------- */
+  .conversationList {
+  flex: 1;
+  padding: 0 0 14px;
+  margin: 0;
+  list-style: none;
+  overflow-y: auto;
+  }
+  /* ---------- CHAT ITEMS ---------- */
+  .conversationListItem {
+  width: 100%;
+  margin: 0;
+  border: none;
+  outline: none;
+  display: flex;
+  align-items: center;
+  padding: 0 18px;
+  height: 46px;
+  background: #fff;
+  transition: background .19s;
+  cursor: pointer;
+  user-select: none;
+  font-size: 1rem;
+  color: #2b2c30;
+  gap: 8px; /* keeps a little spacing */
+  overflow: hidden; /* ADD THIS: prevent content from overflowing */
+  }
+  .conversationListItem:hover { background: #e0e0e0; }
+  .activeConversation {
+  background: #fff;
+  color: #1a1a1a;
+  font-weight: 600;
+  }
+  /* title text */
+  .conversationTitle {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 1.04rem;
+  letter-spacing: -0.01em;
+  min-width: 0; /* ADD THIS: Allow text to shrink below content size */
+  }
+  /* keyboard focus outline */
+  .conversationListItem:focus-visible {
+  outline: 2px solid #b1b1b7;
+  outline-offset: 1px;
+  }
+  /* ---------- DELETE BUTTON (THIS WAS MISSING) ---------- */
+  .deleteConversationButton {
+  background: none;
+  border: none;
+  color: #c22;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.35;
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
+  transition: opacity 0.15s, transform 0.15s;
+  flex-shrink: 0; /* ADD THIS: Prevent button from shrinking */
+  position: relative; /* ADD THIS: Ensure the button stays in flow */
+  }
+  .conversationListItem:hover .deleteConversationButton,
+  .deleteConversationButton:focus-visible {
+  opacity: 1;
+  transform: scale(1.15);
+  }
+  /* ---------- NEW CHAT BUTTON ---------- */
+  .newConversationButton {
+  margin: 24px auto 0;
+  font-size: 2.7rem;
+  color: #888;
+  background: transparent;
+  border: none;
+  padding: 0 8px;
+  cursor: pointer;
+  line-height: 1;
+  font-weight: 500;
+  transition: color 0.14s;
+  }
+  .newConversationButton:hover,
+  .newConversationButton:focus { color: #444; }

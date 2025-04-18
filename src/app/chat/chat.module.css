@@ -1,0 +1,288 @@
+/**
+ * CSS Modules for ChatPage and related components.
+ *
+ * Classes defined here are locally scoped to the components
+ * that import this file, preventing style collisions.
+ */
+
+/* --- Fixed Height Utilities --- */
+.fixedHeightBackButton {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  padding: 0;
+}
+.fixedHeightTitle {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.fixedHeightHeader {
+  height: 60px;
+  box-sizing: border-box;
+}
+.fixedHeightMessageText {
+  min-height: 24px;
+}
+.fixedHeightInputText {
+  min-height: 24px;
+}
+
+/* --- General Styles --- */
+.headerButton {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #555; /* Adjust color as needed */
+}
+.headerButton:hover {
+  color: #000; /* Darker color on hover */
+}
+/* Add style for the sign out button */
+.signOutButton {
+  /* Inherits from headerButton */
+  padding: 4px 8px; /* Adjust padding for text */
+  font-size: 0.9em; /* Slightly smaller font */
+  border: 1px solid #ccc; /* Optional: add a light border */
+  border-radius: 4px; /* Optional: rounded corners */
+  background-color: #f8f8f8; /* Optional: light background */
+}
+.signOutButton:hover {
+  background-color: #eee; /* Slightly darker on hover */
+  border-color: #bbb;
+}
+.headerTitle {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 18px;
+  font-weight: 600;
+  text-align: center;
+  color: #333;
+  margin: 0;
+  width: auto;
+  /* Combine fixed height */
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.headerToggleContainer {
+  margin-left: auto;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* --- Message Styles --- */
+.messageSender {
+  font-weight: bold;
+  margin-right: 8px;
+}
+.messageText {
+  /* Combine fixed height */
+  min-height: 24px;
+  margin: 4px 0 0;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+  line-height: 1.4;
+  font-size: 15px;
+  color: #333;
+}
+
+/* --- Improved message bubbles: fix text bleeding and add styling for both user and bot bubbles --- */
+
+.userMessageBubble,
+.botMessageBubble {
+  border-radius: 18px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  max-width: 80%;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+
+  /* Prevent text from bleeding out */
+  overflow: hidden;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  white-space: pre-line;
+  display: inline-block;
+}
+
+/* User bubble coloring (customize as needed) */
+.userMessageBubble {
+  background-color: #e3f2fd;
+  color: #222;
+  align-self: flex-end;
+}
+
+/* Bot bubble coloring (customize as needed) */
+.botMessageBubble {
+  background-color: #f5f5f5;
+  color: #222;
+  align-self: flex-start;
+}
+
+/* --- Markdown/Code Fix --- */
+:global(pre), :global(code) {
+  max-width: 100%;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+  font-size: 14px;
+  overflow-x: auto;
+}
+
+/* --- Input Area Styles --- */
+.inputAreaWrapper {
+  width: 100%;
+  max-width: 800px;
+  border-radius: 26px;
+  border: 1px solid #ddd;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+  background-color: #fff;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.selectedFilesContainer {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 8px;
+  padding: 8px 15px;
+  border-bottom: 1px solid #ddd;
+}
+.selectedFileItem {
+  display: flex;
+  align-items: center;
+  background-color: rgba(0,0,0,0.05);
+  border-radius: 12px;
+  padding: 3px 8px;
+  font-size: 12px;
+  color: #333;
+  max-width: 100%;
+}
+.selectedFileName {
+  margin-right: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+.removeFileButton {
+  background: none;
+  border: none;
+  color: #555;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+  margin-left: auto;
+}
+.inputFormWrapper {
+  display: flex;
+  padding: 0;
+  background-color: transparent;
+}
+.textareaBase {
+  width: 100%;
+  padding: 8px 20px;
+  border: none;
+  outline: none;
+  font-size: 16px;
+  background-color: transparent;
+  color: #555;
+  resize: none;
+  min-height: 40px;
+  max-height: 220px;
+  overflow: auto;
+  line-height: 1.5;
+  box-sizing: border-box;
+  font-family: 'Baloo 2', sans-serif;
+  /* Specific padding/border-radius handled in component */
+  padding-right: 12px; /* Restore basic right padding */
+}
+.iconButton {
+  /* Remove absolute positioning, container will handle it */
+  /* position: absolute; */
+  /* bottom: 8px; */
+  /* z-index: 2; */
+  background-color: transparent;
+  border: none;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: #5f6368;
+}
+.sendStopButtonContainer {
+  /* Remove absolute positioning */
+  /* position: absolute; */
+  /* right: 8px; */
+  /* bottom: 8px; */
+  /* z-index: 2; */
+  /* Keep flex properties to arrange buttons */
+  display: flex;
+  align-items: center;
+  gap: 8px; /* Add space between buttons */
+}
+.sendButton {
+  /* Change background to light grey */
+  background-color: #a0a0a0;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  font-size: 18px;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  padding: 0;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+}
+/* Modifier class for disabled send button */
+.sendButtonDisabled {
+  /* Change background to transparent and add border */
+  background-color: transparent;
+  /* Change border color to light grey */
+  border: 2px solid #BDBDBD;
+  /* Change cursor to default instead of not-allowed */
+  cursor: default;
+  /* box-shadow: none; */ /* Remove this line, not needed */
+}
+/* Style the SVG path within the disabled button */
+.sendButtonDisabled svg path {
+  /* Change stroke color to light grey */
+  stroke: #BDBDBD;
+}
+.stopButton {
+  background-color: transparent;
+  color: #757575;
+  border: 2px solid #757575;
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  padding: 0;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+/* Add converted styles here */

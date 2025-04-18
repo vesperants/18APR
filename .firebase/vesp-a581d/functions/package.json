@@ -1,0 +1,26 @@
+{
+  "name": "vesp",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@google-cloud/storage": "^7.16.0",
+    "@google/genai": "^0.7.0",
+    "@google/generative-ai": "^0.24.0",
+    "firebase": "^11.5.0",
+    "fuse.js": "^7.1.0",
+    "nepscript": "^1.0.18",
+    "next": "15.2.4",
+    "papaparse": "^5.5.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "rehype-raw": "^7.0.0",
+    "firebase-frameworks": "^0.11.0",
+    "firebase-functions": "^6.0.1",
+    "firebase-admin": "^11.11.1"
+  },
+  "main": "server.js",
+  "engines": {
+    "node": "20"
+  }
+}
