@@ -1,0 +1,20 @@
+/* src/components/InitialGreeting.module.css */
+
+.greetingHeading {
+  font-size: 28px;
+  font-weight: 500;
+  margin-bottom: 10px;
+  text-align: center;
+  color: #333;
+  min-height: 42px; /* Maintain height */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.5;
+  padding: 0 10px;
+}
+
+.greetingText {
+  display: inline-block; /* Keep inline-block behavior if needed */
+  text-align: center; /* Ensure text is centered within the span */
+} 

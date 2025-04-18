@@ -1,0 +1,31 @@
+.languageButton {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: none;
+  background: none;
+  font-size: 1.1rem;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.13s;
+  outline: none;
+}
+
+.languageButton:focus,
+.languageButton:hover {
+  background: #f4f4fa;
+}
+
+.englishOption {
+  color: #223FAA;
+  /* If you want blue or accent color for EN mode */
+}
+
+.nepaliOption {
+  color: #B22525;
+  /* If you want red or accent color for NEP */
+}

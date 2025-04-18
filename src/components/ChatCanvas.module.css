@@ -1,0 +1,23 @@
+/* src/components/ChatCanvas.module.css */
+
+.canvasContainer {
+  flex: 0 0 50%; /* Takes 50% width, doesn't grow or shrink */
+  padding: 20px;
+  background-color: #f0f0f0; /* Light grey background for distinction */
+  border-left: 1px solid #ccc; /* Separator line */
+  overflow: hidden; /* Prevent overflow in canvas area */
+  box-sizing: border-box; /* Include padding/border in width calculation */
+  height: 100%; /* Ensure it takes full height of its flex container */
+}
+
+.canvasPlaceholder {
+  height: 100%;
+  background-color: white;
+  border-radius: 10px; /* Rounded rectangle */
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* Shadow */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 20px;
+  color: #888;
+} 

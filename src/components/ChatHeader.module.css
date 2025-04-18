@@ -1,0 +1,85 @@
+/* ChatHeader.module.css */
+
+/* Main container for the header */
+.headerContainer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between; /* Space out items */
+  padding: 15px 20px;
+  border-bottom: 1px solid #e6e6e6;
+  background-color: #fff;
+  position: relative; /* Keep relative positioning if needed */
+}
+
+/* Container for the left section (shelf toggle) */
+.leftSection {
+  min-width: 45px; /* Maintain alignment */
+  display: flex;
+  justify-content: flex-start;
+}
+
+/* Container for the right section (children like toggle, profile button) */
+.rightSection {
+  min-width: 45px; /* Maintain alignment */
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 15px; /* Space between toggle and profile */
+}
+
+/* General styling for header buttons */
+.headerButton {
+  /* Add base styles if needed */
+  padding: 10px; /* Specific padding for toggle button */
+  background: none; 
+  border: none; 
+  cursor: pointer; 
+  display: inline-flex; /* Align SVG properly */
+  align-items: center;
+  justify-content: center;
+  color: #333; /* Example color */
+}
+
+/* Styling for the main title */
+.headerTitle {
+  text-align: center;
+  margin: 0; /* Remove default margins */
+  flex-grow: 1; /* Allow title to take up space if needed */
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+/* Styling for the profile button */
+.profileButton {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  border-radius: 50%;
+  overflow: hidden;
+  width: 40px;
+  height: 40px;
+  display: flex; /* Use flex to center image */
+  align-items: center;
+  justify-content: center;
+}
+
+/* Styling for the profile image within the button */
+.profileImage {
+  display: block; /* Remove extra space below image */
+  border-radius: 50%; /* Ensure image itself is round */
+  width: 100%; /* Make image fill the button */
+  height: 100%; /* Make image fill the button */
+  object-fit: cover; /* Cover the area without distortion */
+}
+
+/* Style for the SVG icon in the toggle button */
+.toggleIcon {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+} 

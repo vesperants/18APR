@@ -1,0 +1,55 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+# Ignore node_modules folders anywhere in the project (removed leading '/')
+node_modules/
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+# Ignore coverage folders anywhere in the project (removed leading '/')
+coverage/
+
+# next.js
+# Ignore .next folders anywhere in the project (removed leading '/')
+.next/
+# Ignore out folders anywhere in the project (removed leading '/')
+out/
+
+# production
+# Ignore build folders anywhere in the project (removed leading '/')
+build/
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files
+# Ignore all .env files. Consider committing a .env.example instead.
+# Be careful not to commit files with secrets like .env.local
+.env*
+
+# vercel
+.vercel
+
+# Firebase - Optional but recommended
+# Ignore emulator data, logs, etc.
+.firebase/emulators/
+*.log
+*.logs
+
+# typescript
+*.tsbuildinfo
+# next-env.d.ts is usually required for TS compilation, typically should NOT be ignored.
+# Removed: next-env.d.ts
