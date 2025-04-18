@@ -27,7 +27,10 @@ export async function runLegalSearchChain({
   try {
     if (DEBUG) console.log(`[SearchEngine Chain] Received query: "${userQuery}", extractToggle=${extractToggle}`);
     const processed = await processQueryWithGemini({ query: userQuery });
+    console.log(`[SearchEngine Chain] processed query:`, processed.processedQuery);
+    console.log(`[SearchEngine Chain] calling queryOpenAIAssistant with processedQuery`);
     const openaiResult = await queryOpenAIAssistant({ query: processed.processedQuery });
+    console.log(`[SearchEngine Chain] queryOpenAIAssistant returned response:`, openaiResult.response);
     const extractorOut = await processAssistantText({
       assistantText: openaiResult.response,
       toggleExtract: extractToggle,
@@ -47,6 +50,7 @@ export async function runLegalSearchChain({
       _toolCallTitle: toolCallTitle
     };
   } catch (err) {
+    console.error(`[SearchEngine Chain] Error during legal search chain:`, err);
     return {
       finalText: "",
       filesFetched: [],

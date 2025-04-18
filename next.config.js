@@ -1,10 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // ...your existing configuration
-  experimental: {
-    // ...your existing experimental config
-    serverComponentsExternalPackages: ['@google/genai']
-  }
+  // Externalize certain packages for Server Components
+  // (moved from experimental.serverComponentsExternalPackages in Next.js 15)
+  serverExternalPackages: ['@google/genai'],
 }
 
 module.exports = nextConfig 

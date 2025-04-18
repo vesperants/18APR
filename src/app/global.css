@@ -192,3 +192,12 @@ body {
 .button-search:hover { background-color: #004494; }
 .button-clear { background-color: #28a745; }
 .button-clear:hover { background-color: #218838; }
+/* --- Code/Pre Styling (from chat.module.css) --- */
+pre, code {
+  max-width: 100%;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+  font-size: 14px;
+  overflow-x: auto;
+}

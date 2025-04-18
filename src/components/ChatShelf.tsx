@@ -7,7 +7,7 @@ import { translations } from '@/constants/translations';
 interface ChatShelfProps {
   isOpen: boolean;
   onClose: () => void;
-  conversationList: { id: string; title: string; updatedAt?: any }[];
+  conversationList: { id: string; title: string }[];
   activeConversationId: string | null;
   onSelectConversation: (id: string) => void;
   onNewConversation: () => void;

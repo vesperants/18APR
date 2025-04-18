@@ -129,15 +129,6 @@
   align-self: flex-start;
 }
 
-/* --- Markdown/Code Fix --- */
-:global(pre), :global(code) {
-  max-width: 100%;
-  word-break: break-word;
-  overflow-wrap: break-word;
-  white-space: pre-wrap;
-  font-size: 14px;
-  overflow-x: auto;
-}
 
 /* --- Input Area Styles --- */
 .inputAreaWrapper {

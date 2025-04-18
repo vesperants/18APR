@@ -20,6 +20,9 @@ export const OPENAI_API_KEY =
   process.env.OPENAI_API_KEY || '';
 export const OPENAI_ASSISTANT_ID =
   process.env.OPENAI_ASSISTANT_ID || '';
+// Model ID for direct Chat Completions
+export const OPENAI_CHAT_MODEL =
+  process.env.OPENAI_CHAT_MODEL || 'gpt-3.5-turbo';
 
 export const GCS_LAW_PREFIX =
   process.env.LAW_JSON_DATA_PREFIX || ''; // Optional, e.g. 'data/'

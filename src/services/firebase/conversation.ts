@@ -12,7 +12,8 @@ import {
   orderBy,
   deleteDoc,
   updateDoc,
-  increment
+  increment,
+  onSnapshot
 } from 'firebase/firestore';
 import { db } from './config';
 
@@ -43,12 +44,61 @@ export async function getConversationList(uid: string) {
   const snap = await getDocs(q);
   return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 }
+/**
+ * Subscribe to real-time updates of the user's conversation list.
+ * Returns an unsubscribe function.
+ */
+export function subscribeToConversationList(
+  uid: string,
+  onUpdate: (convos: Array<{ id: string; [key: string]: any }>) => void,
+  onError?: (error: Error) => void
+): () => void {
+  const conversationsRef = collection(db, 'users', uid, 'conversations');
+  const q = query(conversationsRef, orderBy('updatedAt', 'desc'));
+  const unsubscribe = onSnapshot(
+    q,
+    snap => {
+      const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      onUpdate(data);
+    },
+    err => {
+      if (onError) onError(err);
+      console.error('Error subscribing to conversation list:', err);
+    }
+  );
+  return unsubscribe;
+}
 
 export async function getConversationMessages(uid: string, conversationId: string) {
   const messagesRef = collection(db, 'users', uid, 'conversations', conversationId, 'messages');
   const q = query(messagesRef, orderBy('timestamp', 'asc'));
   const snap = await getDocs(q);
   return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+}
+/**
+ * Subscribe to real-time updates of messages in a conversation.
+ * Returns an unsubscribe function.
+ */
+export function subscribeToConversationMessages(
+  uid: string,
+  conversationId: string,
+  onUpdate: (msgs: Array<{ id: string; sender: string; text: string; timestamp: any }>) => void,
+  onError?: (error: Error) => void
+): () => void {
+  const messagesRef = collection(db, 'users', uid, 'conversations', conversationId, 'messages');
+  const q = query(messagesRef, orderBy('timestamp', 'asc'));
+  const unsubscribe = onSnapshot(
+    q,
+    snap => {
+      const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      onUpdate(data);
+    },
+    err => {
+      if (onError) onError(err);
+      console.error('Error subscribing to conversation messages:', err);
+    }
+  );
+  return unsubscribe;
 }
 
 /**
