@@ -67,33 +67,30 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
           return (
             <div key={chat.id || index} className={messageRowClass.trim()}>
               <div className={isUser ? styles.userMessageBubble : styles.botMessageBubble}>
-                <span className={styles.messageSender}>
-                  {isUser ? translations.you[language] : translations.botName[language]}
-                </span>
-                <div className={styles.messageText}>
+                {/* Show sender label only for bot messages; remove 'you' label for user */}
+                {!isUser && (
+                  <span className={styles.messageSender}>
+                    {translations.botName[language]}
+                  </span>
+                )}
+              <div className={styles.messageText}>
                   {isUser ? (
                     <span>{chat.text}</span>
-                  ) : renderBotMessage ? (
-                    renderBotMessage(chat)
                   ) : (
-                    <ReactMarkdown components={markdownComponents}>{chat.text}</ReactMarkdown>
+                    // Bot: show inline typing indicator while placeholder has no words yet
+                    isBotReplying && chat.wordsBatches?.length === 0 ? (
+                      <span>{translations.botTyping[language] || '...'}</span>
+                    ) : renderBotMessage ? (
+                      renderBotMessage(chat)
+                    ) : (
+                      <ReactMarkdown components={markdownComponents}>{chat.text}</ReactMarkdown>
+                    )
                   )}
                 </div>
               </div>
             </div>
           );
         })}
-        {/* Typing indicator */}
-        {isBotReplying &&
-          !stopTypingRef.current &&
-          chatHistory.length > 0 &&
-          chatHistory[chatHistory.length - 1]?.sender === 'bot' && (
-            <div className={listStyles.typingIndicatorWrapper}>
-              <p className={`${styles.messageText} ${listStyles.typingIndicatorText}`}>
-                {translations.botTyping[language] || 'Typing...'}
-              </p>
-            </div>
-          )}
       </div>
     </div>
   );

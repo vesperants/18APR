@@ -35,6 +35,8 @@
 /* Row container for each individual message, handles alignment */
 .messageRow {
   display: flex;
+  /* Allow message bubbles to wrap within the row to prevent overflow */
+  flex-wrap: wrap;
   margin-bottom: 10px;
 }
 

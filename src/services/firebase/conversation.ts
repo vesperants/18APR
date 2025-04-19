@@ -192,3 +192,14 @@ export async function getToolCall(uid: string, conversationId: string, toolCallI
   const snap = await getDoc(ref);
   return snap.exists() ? snap.data() : null;
 }
+/**
+ * Update the title of an existing conversation and bump its updatedAt timestamp.
+ */
+export async function updateConversationTitle(
+  uid: string,
+  conversationId: string,
+  title: string
+): Promise<void> {
+  const convoDocRef = doc(db, 'users', uid, 'conversations', conversationId);
+  await updateDoc(convoDocRef, { title, updatedAt: serverTimestamp() });
+}

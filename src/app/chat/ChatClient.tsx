@@ -25,6 +25,7 @@ import {
   deleteConversation,
   subscribeToConversationList,
   subscribeToConversationMessages,
+  updateConversationTitle,
 } from '@/services/firebase/conversation';
 
 // Type for raw messages from Firestore subscription
@@ -48,7 +49,7 @@ interface ChatMessage {
 }
 
 export default function ChatClient() {
-  const BATCH_SIZE = 4;
+  const BATCH_SIZE = 1;
   const FADE_DURATION_MS = 1200;
 
   const { user, loading, signOut } = useAuth();
@@ -59,6 +60,13 @@ export default function ChatClient() {
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([]);
   const [isBotReplying, setIsBotReplying] = useState(false);
+  // Ref to track bot replying state in subscription listener
+  const isBotReplyingRef = useRef<boolean>(false);
+  // Sync ref with state so subscription callback can read latest value
+  useEffect(() => {
+    isBotReplyingRef.current = isBotReplying;
+  }, [isBotReplying]);
+  // Always start in chat view without initial greeting overlay
   const [isInitialState, setIsInitialState] = useState(true);
   const [isShelfOpen, setIsShelfOpen] = useState(false);
   const [inputAreaHeight, setInputAreaHeight] = useState(80);
@@ -77,6 +85,15 @@ export default function ChatClient() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [conversationList, setConversationList] = useState<ConversationListItem[]>([]);
   const [onboardingDone, setOnboardingDone] = useState<boolean>(false);
+  // Optimistically reorder (and optionally rename) a conversation in the shelf
+  const updateLocalShelf = (id: string, newTitle?: string) => {
+    setConversationList(prev => {
+      const filtered = prev.filter(c => c.id !== id);
+      const existing = prev.find(c => c.id === id);
+      const title = newTitle ?? existing?.title ?? translations.untitledChat[language];
+      return [{ id, title }, ...filtered];
+    });
+  };
   const [checkingOnboarding, setCheckingOnboarding] = useState<boolean>(true);
 
   // Subscribe to conversation list and ensure onboarding
@@ -109,11 +126,11 @@ export default function ChatClient() {
             }
             return;
           }
-          const mapped = convos.map(c => ({ id: c.id, title: c.title || '' }));
-          setConversationList(mapped);
-          setConversationId(prev => prev || mapped[0]?.id || null);
-          setOnboardingDone(true);
-          setCheckingOnboarding(false);
+      const mapped = convos.map(c => ({ id: c.id, title: c.title || '' }));
+      setConversationList(mapped);
+      // Do not auto-select existing conversations; wait for user action
+      setOnboardingDone(true);
+      setCheckingOnboarding(false);
         } else {
           // Keep conversation list updated
           setConversationList(convos.map(c => ({ id: c.id, title: c.title || '' })));
@@ -137,6 +154,10 @@ export default function ChatClient() {
       user.uid,
       conversationId,
       (rawMsgs: RawMessageFromFirestore[]) => {
+        // Always show chat view; disable initial greeting overlay
+        setIsInitialState(false);
+        // If a bot reply is in progress, do not override optimistic or streaming state
+        if (isBotReplyingRef.current) return;
         const normalized = rawMsgs.map(m => ({
           sender: m.sender,
           text: m.text,
@@ -144,10 +165,6 @@ export default function ChatClient() {
           id: m.id,
         }));
         setChatHistory(normalized);
-        setIsInitialState(
-          normalized.length === 0 ||
-          (normalized.length === 1 && normalized[0].sender === 'bot')
-        );
       },
       err => console.error('Subscription error (messages):', err)
     );
@@ -170,16 +187,43 @@ export default function ChatClient() {
       alert('Failed to delete conversation.');
     }
   };
+  // Handle renaming a conversation
+  const handleRenameConversation = async (idToRename: string, newTitle: string) => {
+    if (!user) return;
+    try {
+      updateLocalShelf(idToRename, newTitle);
+      await updateConversationTitle(user.uid, idToRename, newTitle);
+    } catch (err) {
+      console.error('Error renaming conversation:', err);
+    }
+  };
 
   // Send message
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user || !conversationId || (!message.trim() && selectedFiles.length === 0)) return;
     const trimmedMessage = message.trim();
+    if (!user || (!trimmedMessage && selectedFiles.length === 0)) return;
+    // Create a new conversation if none exists (initial state)
+    let convoId = conversationId;
+    const isNewConvo = !convoId;
+    if (isNewConvo) {
+      const docRef = await createConversation(user.uid, translations.untitledChat[language]);
+      convoId = docRef.id;
+      setConversationId(convoId);
+    }
     const filesToProcess = selectedFiles;
 
     stopTypingRef.current = false;
+    // Hide initial greeting when starting conversation
     if (isInitialState) setIsInitialState(false);
+    // Immediate shelf update: bring this convo to top and rename if new
+    if (isNewConvo) {
+      const firstWords = trimmedMessage.split(/\s+/).slice(0, 3).join(' ');
+      updateLocalShelf(convoId, firstWords);
+      updateConversationTitle(user.uid!, convoId, firstWords).catch(err => console.error('Error renaming conversation:', err));
+    } else {
+      updateLocalShelf(convoId);
+    }
     if (abortControllerRef.current) abortControllerRef.current.abort();
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -189,13 +233,29 @@ export default function ChatClient() {
     setSelectedFiles([]);
     if (textareaRef.current) textareaRef.current.style.height = '40px';
 
-    // Optimistic UI: add user message immediately, then autoscroll
+    // Optimistic UI: add user message immediately, then placeholder bubble + autoscroll
     const userMsgId = `user_${Date.now()}`;
     setChatHistory(prev => [
       ...prev,
       { sender: 'user', text: trimmedMessage, timestamp: new Date(), id: userMsgId }
     ]);
-    // Autoscroll to show the newly added user message
+    // Prepare bot placeholder: insert empty bubble, will show ellipses after delay
+    let placeholderTimer: ReturnType<typeof setTimeout>;
+    const botResponseId = `bot_${Date.now()}`;
+    setIsBotReplying(true);
+    setChatHistory(prev => [
+      ...prev,
+      { sender: 'bot', text: ' ', wordsBatches: [], timestamp: new Date(), id: botResponseId }
+    ]);
+    // Show typing ellipses after 500ms if still waiting
+    placeholderTimer = window.setTimeout(() => {
+      setChatHistory(prev =>
+        prev.map(msg =>
+          msg.id === botResponseId ? { ...msg, text: translations.botTyping[language] || '...' } : msg
+        )
+      );
+    }, 500);
+    // Autoscroll to show the newly added bubbles
     requestAnimationFrame(() => {
       if (chatContainerRef.current) {
         chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
@@ -205,7 +265,7 @@ export default function ChatClient() {
     // Add user message to Firestore
     addMessageToConversation({
       uid: user.uid,
-      conversationId,
+      conversationId: convoId,
       sender: 'user',
       text: trimmedMessage,
     }).catch(err => console.error('Error adding user message:', err));
@@ -228,16 +288,10 @@ export default function ChatClient() {
       return;
     }
 
-    setIsBotReplying(true);
-    // Prepare bot response shell in UI
-    const botResponseId = `bot_${Date.now()}`;
-    setChatHistory(prev => [
-      ...prev,
-      { sender: 'bot', text: '', wordsBatches: [], timestamp: new Date(), id: botResponseId }
-    ]);
+    // Bot placeholder already added earlier; proceed with API call
     try {
       // API HISTORY: Provide role/parts, but also send uid/conversationId!
-      const rawHistory = (await getConversationMessages(user.uid, conversationId)) as Array<{ sender: 'user' | 'bot'; text: string }>;
+      const rawHistory = (await getConversationMessages(user.uid, convoId)) as Array<{ sender: 'user' | 'bot'; text: string }>;
       const historyForApi = rawHistory.map(msg => ({
         role: msg.sender === 'user' ? 'user' : 'model',
         parts: [{ text: msg.text }]
@@ -248,7 +302,7 @@ export default function ChatClient() {
         history: historyForApi,
         files: filesPayload,
         uid: user.uid,
-        conversationId,
+        conversationId: convoId,
       }, controller.signal);
 
       if (!response.ok) {
@@ -328,7 +382,7 @@ export default function ChatClient() {
       // Store bot reply in Firestore
       await addMessageToConversation({
         uid: user.uid,
-        conversationId,
+        conversationId: convoId,
         sender: 'bot',
         text: textSoFar,
       });
@@ -341,6 +395,8 @@ export default function ChatClient() {
         )
       );
     } finally {
+      // Clear typing ellipses timer
+      clearTimeout(placeholderTimer);
       setIsBotReplying(false);
       abortControllerRef.current = null;
     }
@@ -463,10 +519,7 @@ export default function ChatClient() {
     return msg.wordsBatches.map((batch, batchIdx) =>
       <BatchFade show={true} duration={FADE_DURATION_MS} key={batchIdx}>
         {batch.map((w, wi) => (
-          <span
-            key={wi}
-            style={{ whiteSpace: /\s/.test(w.word) ? 'pre' : undefined }}
-          >
+          <span key={wi}>
             {w.word}
           </span>
         ))}
@@ -506,6 +559,7 @@ export default function ChatClient() {
           setChatHistory([]);
         }}
         onDeleteConversation={handleDeleteConversation}
+        onRenameConversation={handleRenameConversation}
       />
       <div style={{
         display: 'flex', height: '100vh', width: '100vw', overflow: 'hidden'
@@ -540,7 +594,8 @@ export default function ChatClient() {
               position: 'absolute', top: 0, left: 0, right: 0,
               bottom: isInitialState ? 0 : `${inputAreaHeight}px`,
               opacity: isInitialState ? 0 : 1,
-              transition: 'opacity 0.5s 0.2s ease-in-out, bottom 0.3s ease-out',
+              // Faster reveal: no delay, complete fade in 0.5s alongside overlay fade
+              transition: 'opacity 0.5s ease-in-out, bottom 0.3s ease-out',
               zIndex: 2
             }}>
               <ChatMessageList
@@ -562,7 +617,10 @@ export default function ChatClient() {
               bottom: isInitialState ? 'auto' : '35px',
               top: isInitialState ? '50%' : 'auto',
               transform: 'translateX(-50%)' + (isInitialState ? ' translateY(-50%)' : ''),
-              transition: 'top 0.5s linear, bottom 0.5s linear, transform 0.5s linear',
+              // Disable slide animation after initial greeting for instant input placement
+              transition: isInitialState
+                ? 'top 0.5s linear, bottom 0.5s linear, transform 0.5s linear'
+                : 'none',
               zIndex: 3
             }}>
             <ChatInputArea

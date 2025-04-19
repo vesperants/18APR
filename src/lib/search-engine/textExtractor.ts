@@ -10,6 +10,13 @@ import type { TextExtractorInput, TextExtractorOutput } from "./types";
 const logPrefix = "[TextExtractor]";
 const storage = new Storage();
 const lawBucket = storage.bucket(GCS_LAW_BUCKET);
+/**
+ * Preload the list of files in the law bucket to avoid repeated exists checks.
+ */
+const lawFilesPromise: Promise<Set<string>> = (async () => {
+  const [files] = await lawBucket.getFiles();
+  return new Set(files.map(f => f.name));
+})();
 
 // Utility: Extract valid JSON "object" from a string (even with Markdown, pre/post text)
 function robustJsonParse(text: string): any {
@@ -209,13 +216,13 @@ export async function processAssistantText(
       console.log(`[TextExtractor] Attempting to load: "${docName}"`);
       console.log(`[TextExtractor] Sections to extract:`, docSections.join(', '));
     }
-    const file = lawBucket.file(docName);
-    const [exists] = await file.exists();
-    if (!exists) {
+    // Use cached file list to check existence, then download
+    const lawFilesSet = await lawFilesPromise;
+    if (!lawFilesSet.has(docName)) {
       console.log(`[TextExtractor] ERROR: File does NOT exist in bucket: ${docName}`);
       throw new Error(`Document not found in bucket: ${docName}`);
     }
-    const [fileContents] = await file.download();
+    const [fileContents] = await lawBucket.file(docName).download();
     const fullText = fileContents.toString("utf8");
     const { sectionsFound, extracted, notFound } = extractSectionsFromText(
       fullText,

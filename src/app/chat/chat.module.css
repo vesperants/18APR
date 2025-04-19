@@ -95,6 +95,15 @@
   line-height: 1.4;
   font-size: 15px;
   color: #333;
+  /* Ensure the message text wrapper can shrink and wrap within bubble */
+  width: 100%;
+  min-width: 0;
+}
+/* Ensure wrapping rules apply to all nested elements within message text */
+.messageText, .messageText * {
+  word-break: normal;
+  overflow-wrap: break-word;
+  hyphens: auto;
 }
 
 /* --- Improved message bubbles: fix text bleeding and add styling for both user and bot bubbles --- */
@@ -107,12 +116,19 @@
   max-width: 80%;
   box-shadow: 0 1px 2px rgba(0,0,0,0.1);
 
-  /* Prevent text from bleeding out */
-  overflow: hidden;
-  word-break: break-word;
+  /* Flex items need min-width:0 to allow shrinking and wrapping */
+  min-width: 0;
+  flex-shrink: 1;
+
+  /* Ensure text wraps at word boundaries and only breaks words when necessary */
+  word-break: normal;
   overflow-wrap: break-word;
-  white-space: pre-line;
-  display: inline-block;
+  /* Allow hyphenation when breaking words */
+  hyphens: auto;
+  white-space: pre-wrap;
+  /* Make bubble a flex container to support internal wrapping */
+  display: flex;
+  flex-direction: column;
 }
 
 /* User bubble coloring (customize as needed) */

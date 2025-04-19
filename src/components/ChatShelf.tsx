@@ -12,6 +12,8 @@ interface ChatShelfProps {
   onSelectConversation: (id: string) => void;
   onNewConversation: () => void;
   onDeleteConversation: (id: string) => void;
+  onRenameConversation: (id: string, newTitle: string) => void;
+  onRenameConversation: (id: string, newTitle: string) => void;
 }
 
 const ChatShelf: React.FC<ChatShelfProps> = ({
@@ -22,8 +24,12 @@ const ChatShelf: React.FC<ChatShelfProps> = ({
   onSelectConversation,
   onNewConversation,
   onDeleteConversation,
+  onRenameConversation,
 }) => {
   const { language } = useLanguage();
+  // Rename state
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState<string>('');
   const shelfRef = useRef<HTMLDivElement>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
 
@@ -106,9 +112,48 @@ const ChatShelf: React.FC<ChatShelfProps> = ({
                   onMouseLeave={() => setHoveredId(null)}
                   // position: 'relative' removed, now in CSS!
                 >
-                  <span className={styles.conversationTitle}>
-                    {convo.title || translations.untitledChat[language] || 'Untitled Chat'}
-                  </span>
+                  {editingId === convo.id ? (
+                    <input
+                      className={styles.conversationTitle}
+                      value={editingTitle}
+                      autoFocus
+                      onChange={e => setEditingTitle(e.target.value)}
+                      onBlur={() => {
+                        const newTitle = editingTitle.trim() || translations.untitledChat[language];
+                        onRenameConversation(convo.id, newTitle);
+                        setEditingId(null);
+                      }}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          (e.target as HTMLInputElement).blur();
+                        } else if (e.key === 'Escape') {
+                          setEditingId(null);
+                        }
+                      }}
+                    />
+                  ) : (
+                    <>
+                      <span
+                        className={styles.conversationTitle}
+                      >
+                        {convo.title || translations.untitledChat[language] || 'Untitled Chat'}
+                      </span>
+                      {/* Rename button (I-beam cursor) */}
+                      <button
+                        type="button"
+                        className={styles.renameConversationButton}
+                        title="Rename conversation"
+                        aria-label="Rename conversation"
+                        onClick={e => {
+                          e.stopPropagation();
+                          setEditingId(convo.id);
+                          setEditingTitle(convo.title);
+                        }}
+                      >
+                        T
+                      </button>
+                    </>
+                  )}
                   {/* Delete button */}
                   <button
                     type="button"
@@ -120,12 +165,6 @@ const ChatShelf: React.FC<ChatShelfProps> = ({
                       onDeleteConversation(convo.id);
                     }}
                     onKeyDown={e => handleDeleteKeyDown(e, convo.id)}
-                    tabIndex={hoveredId === convo.id ? 0 : -1}
-                    style={{
-                      opacity: hoveredId === convo.id ? 1 : 0,
-                      pointerEvents: hoveredId === convo.id ? 'auto' : 'none',
-                      // margin-left removed if present
-                    }}
                   >
                     ×
                   </button>
