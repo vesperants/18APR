@@ -27,6 +27,7 @@ import {
   subscribeToConversationMessages,
   updateConversationTitle,
 } from '@/services/firebase/conversation';
+import styles from './chat.module.css';
 
 // Type for raw messages from Firestore subscription
 type RawMessageFromFirestore = {
@@ -34,6 +35,7 @@ type RawMessageFromFirestore = {
   sender: 'user' | 'bot';
   text: string;
   timestamp?: { toDate(): Date };
+  toolCallId?: string;
 };
 // Conversation list item type
 type ConversationListItem = { id: string; title: string };
@@ -46,6 +48,7 @@ interface ChatMessage {
   wordsBatches?: BotWord[][];
   timestamp: Date;
   id?: string;
+  toolCallId?: string;
 }
 
 export default function ChatClient() {
@@ -95,6 +98,10 @@ export default function ChatClient() {
     });
   };
   const [checkingOnboarding, setCheckingOnboarding] = useState<boolean>(true);
+
+  // Add state for section modal
+  const [sectionModalOpen, setSectionModalOpen] = useState(false);
+  const [sectionContent, setSectionContent] = useState({ title: '', content: '', loading: false });
 
   // Subscribe to conversation list and ensure onboarding
   // Only subscribe once after auth succeeds; omit convoId/onboardingDone from deps intentionally
@@ -163,6 +170,7 @@ export default function ChatClient() {
           text: m.text,
           timestamp: m.timestamp?.toDate ? m.timestamp.toDate() : new Date(),
           id: m.id,
+          toolCallId: m.toolCallId,
         }));
         setChatHistory(normalized);
       },
@@ -515,20 +523,200 @@ export default function ChatClient() {
     return <span style={style}>{children}</span>;
   }
   const renderBotMessage = (msg: ChatMessage) => {
-    if (!msg.wordsBatches || msg.wordsBatches.length === 0) return msg.text;
-    return msg.wordsBatches.map((batch, batchIdx) =>
-      <BatchFade show={true} duration={FADE_DURATION_MS} key={batchIdx}>
-        {batch.map((w, wi) => (
-          <span key={wi}>
-            {w.word}
-          </span>
-        ))}
-      </BatchFade>
+    // Parse the message to find any section references regardless of wordsBatches
+    const lines = msg.text.split('\n');
+    const hasSections = lines.some(line => 
+      /\*?\s*Section(?:\s+\d+)?:/.test(line.trim()) || 
+      /\b(P\d+-C\d+-S\d+)\b/.test(line)
     );
+    
+    if (hasSections) {
+      console.log("Found sections in message:", msg.id); // Debug log
+      return (
+        <div>
+          {lines.map((line, i) => {
+            // Check for section headers with P-C-S format (e.g., P3-C8-S169)
+            const pcsSectionMatch = line.match(/\b(P\d+-C\d+-S\d+)\b/);
+            
+            // Check for section headers with the "Section:" or "Section 123:" format
+            const regularSectionMatch = /\*?\s*Section(?:\s+\d+)?:/.test(line.trim());
+            
+            if (pcsSectionMatch || regularSectionMatch) {
+              const sectionTitle = line.trim();
+              console.log("Rendering section button:", sectionTitle); // Debug log
+              
+              // Extract display text and section identifier
+              let displayText = sectionTitle;
+              let sectionId = '';
+              
+              // For P-C-S format, use the actual title if available or just the P-C-S code
+              if (pcsSectionMatch) {
+                // Get the text after the P-C-S code for display purposes
+                const afterPCS = line.split(pcsSectionMatch[1])[1];
+                if (afterPCS && afterPCS.trim()) {
+                  displayText = afterPCS.trim();
+                  if (displayText.startsWith('-')) {
+                    displayText = displayText.substring(1).trim();
+                  }
+                }
+                
+                // For the section identifier, use the title text if possible, otherwise the P-C-S code
+                if (displayText && displayText.length > 5) {
+                  sectionId = displayText;
+                } else {
+                  sectionId = pcsSectionMatch[1];
+                }
+              } else {
+                // For regular section format, use section title as both display and identifier
+                // Remove the "Section:" or "Section 123:" prefix for cleaner display
+                displayText = sectionTitle.replace(/^\*?\s*Section(?:\s+\d+)?:\s*/, '').trim();
+                sectionId = displayText;
+              }
+              
+              return (
+                <div key={i} className={styles.sectionLine}>
+                  <button 
+                    className={styles.sectionButton}
+                    onClick={() => handleSectionClick(sectionTitle, sectionId, msg.id || '', msg.toolCallId)}
+                    title={`View full section: ${displayText}`}
+                    aria-label={`View section: ${displayText}`}
+                  >
+                    {displayText}
+                  </button>
+                </div>
+              );
+            } else {
+              return <div key={i}>{line}</div>;
+            }
+          })}
+        </div>
+      );
+    }
+    
+    // If no sections found but has wordsBatches, use the standard rendering for streaming
+    if (msg.wordsBatches && msg.wordsBatches.length > 0) {
+      return msg.wordsBatches.map((batch, batchIdx) =>
+        <BatchFade show={true} duration={FADE_DURATION_MS} key={batchIdx}>
+          {batch.map((w, wi) => (
+            <span key={wi}>
+              {w.word}
+            </span>
+          ))}
+        </BatchFade>
+      );
+    }
+    
+    // Otherwise just return the text
+    return msg.text;
+  };
+
+  // Function to handle section button clicks
+  const handleSectionClick = async (sectionTitle: string, sectionId: string, msgId: string, toolCallId?: string) => {
+    // Extract section content - handles both "Section:" and "Section 123:" formats
+    const sectionContent = sectionTitle.replace(/^\*?\s*Section(?:\s+\d+)?:\s*/, '').trim();
+    
+    console.log(`Clicked section: "${sectionContent}" from message: ${msgId}`);
+    console.log("Using section identifier:", sectionId);
+    console.log("Using toolCallId:", toolCallId || "latest (fallback)");
+    
+    if (!user) {
+      console.log("User not authenticated");
+      return;
+    }
+
+    // Find the message that contains this section
+    const message = chatHistory.find(msg => msg.id === msgId);
+    if (!message) {
+      console.log("Message not found");
+      return;
+    }
+    
+    // Set the section title immediately and show loading state
+    setSectionContent({
+      title: sectionContent,
+      content: '',
+      loading: true
+    });
+    setSectionModalOpen(true);
+    
+    try {
+      // Make API call to get only this specific section
+      const response = await fetch('/api/section', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          uid: user.uid,
+          conversationId: conversationId || '',
+          toolCallId: toolCallId || "latest", // Use the specific toolCallId if available
+          sectionId: sectionId // Use the exact section identifier
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        console.error("Error fetching section:", data);
+        setSectionContent(prev => ({
+          ...prev,
+          content: `Error retrieving content: ${data.error || 'Unknown error'}`,
+          loading: false
+        }));
+        return;
+      }
+      
+      console.log("Section content received:", data);
+      
+      // Display only the specific section content
+      setSectionContent(prev => ({
+        ...prev,
+        content: data.content || 'No content available',
+        loading: false
+      }));
+    } catch (error) {
+      console.error("Error fetching section content:", error);
+      setSectionContent(prev => ({
+        ...prev,
+        content: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        loading: false
+      }));
+    }
+  };
+  
+  // Function to close the section modal
+  const handleCloseModal = () => {
+    setSectionModalOpen(false);
+    // Reset content after animation completes
+    setTimeout(() => {
+      setSectionContent({ title: '', content: '', loading: false });
+    }, 300);
   };
 
   return (
     <>
+      {/* Section Content Modal */}
+      {sectionModalOpen && (
+        <div className={styles.modalOverlay} onClick={handleCloseModal}>
+          <div className={styles.sectionModal} onClick={e => e.stopPropagation()}>
+            <div className={styles.modalHeader}>
+              <h3>{sectionContent.title}</h3>
+              <button className={styles.closeButton} onClick={handleCloseModal}>×</button>
+            </div>
+            <div className={styles.modalContent}>
+              {sectionContent.loading ? (
+                <div className={styles.loadingSpinner}>Loading...</div>
+              ) : (
+                <>
+                  <div className={styles.sectionLabel}>
+                    {language === 'en' ? 'Section Content' : 'खण्ड सामग्री'}
+                  </div>
+                  <div className={styles.sectionText}>{sectionContent.content}</div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      
       {/* Modals & overlays */}
       <ProfileModal open={profileModalOpen} onClose={() => setProfileModalOpen(false)} />
       <AccountMenuBubble

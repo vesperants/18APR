@@ -145,6 +145,169 @@
   align-self: flex-start;
 }
 
+/* Section button styles */
+.sectionLine {
+  margin: 6px 0;
+}
+
+.sectionButton {
+  background: #f0f4ff;
+  border: 1px solid #d0d8f0;
+  border-radius: 6px;
+  padding: 8px 12px 8px 30px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #3050a0;
+  width: 100%;
+  text-align: left;
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+  line-height: 1.4;
+  font-weight: 500;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+
+/* Section icon */
+.sectionButton::before {
+  content: "§";
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 16px;
+  color: #5070c0;
+  opacity: 0.7;
+}
+
+.sectionButton:hover {
+  background: #e0e8ff;
+  border-color: #b0c0e0;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 5px rgba(0,0,0,0.1);
+  color: #2040a0;
+}
+
+.sectionButton:hover::before {
+  opacity: 1;
+}
+
+.sectionButton:hover::after {
+  content: "View section";
+  position: absolute;
+  right: 8px;
+  font-size: 11px;
+  color: #3050a0;
+  background-color: rgba(255, 255, 255, 0.7);
+  padding: 2px 6px;
+  border-radius: 4px;
+  opacity: 0.8;
+}
+
+.sectionButton:active {
+  background: #d0e0ff;
+  transform: translateY(1px);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+}
+
+/* --- Modal Styles --- */
+.modalOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.sectionModal {
+  background-color: white;
+  border-radius: 8px;
+  width: 90%;
+  max-width: 700px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  animation: slideUp 0.3s ease-out;
+}
+
+.modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #eaeaea;
+}
+
+.modalHeader h3 {
+  margin: 0;
+  font-size: 18px;
+  color: #333;
+  font-weight: 600;
+}
+
+.closeButton {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: #777;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.closeButton:hover {
+  color: #333;
+}
+
+.modalContent {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.sectionText {
+  white-space: pre-wrap;
+  line-height: 1.6;
+  font-size: 15px;
+  color: #333;
+}
+
+.sectionLabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: #555;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #eaeaea;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.loadingSpinner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100px;
+  font-size: 16px;
+  color: #555;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { transform: translateY(30px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
 
 /* --- Input Area Styles --- */
 .inputAreaWrapper {

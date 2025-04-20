@@ -2,7 +2,6 @@
 
 import {
   doc,
-  setDoc,
   collection,
   addDoc,
   serverTimestamp,
@@ -50,7 +49,7 @@ export async function getConversationList(uid: string) {
  */
 export function subscribeToConversationList(
   uid: string,
-  onUpdate: (convos: Array<{ id: string; [key: string]: any }>) => void,
+  onUpdate: (convos: Array<{ id: string; [key: string]: unknown }>) => void,
   onError?: (error: Error) => void
 ): () => void {
   const conversationsRef = collection(db, 'users', uid, 'conversations');
@@ -82,7 +81,7 @@ export async function getConversationMessages(uid: string, conversationId: strin
 export function subscribeToConversationMessages(
   uid: string,
   conversationId: string,
-  onUpdate: (msgs: Array<{ id: string; sender: string; text: string; timestamp: any }>) => void,
+  onUpdate: (msgs: Array<{ id: string; sender: string; text: string; timestamp: unknown; toolCallId?: string }>) => void,
   onError?: (error: Error) => void
 ): () => void {
   const messagesRef = collection(db, 'users', uid, 'conversations', conversationId, 'messages');
@@ -90,7 +89,10 @@ export function subscribeToConversationMessages(
   const unsubscribe = onSnapshot(
     q,
     snap => {
-      const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const data = snap.docs.map(doc => ({ 
+        id: doc.id, 
+        ...(doc.data() as { sender: string; text: string; timestamp: unknown; toolCallId?: string })
+      }));
       onUpdate(data);
     },
     err => {
