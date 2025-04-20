@@ -34,3 +34,31 @@ export interface LegalSearchChainOutput {
   filesFetched: string[];
   error?: string;
 }
+
+/**
+ * Represents a structured law section with title and content
+ */
+export interface LawSection {
+  title: string;
+  content: string;
+  toolCallId: string;
+  createdAt: Date;
+}
+
+/**
+ * Parameters for retrieving just the titles of law sections
+ */
+export interface SectionTitlesRetrievalParams {
+  uid: string;
+  conversationId: string;
+}
+
+/**
+ * Parameters for retrieving a specific law section
+ */
+export interface SectionTextRetrievalParams {
+  uid: string;
+  conversationId: string;
+  sectionId: string;
+  toolCallId?: string;
+}

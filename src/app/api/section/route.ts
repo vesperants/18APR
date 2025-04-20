@@ -1,40 +1,73 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { retrieveSectionText } from '@/lib/search-engine/toolCallStore';
+import { retrieveSectionText, retrieveSectionTitles } from '@/lib/search-engine';
 import { adminDb } from "@/services/firebase/admin";
 
 interface SectionRequest {
   uid: string;
   conversationId: string;
-  toolCallId: string; // Can be a specific ID or "latest"
+  toolCallId?: string; // Optional - defaults to "latest"
   sectionId: string;
 }
 
 /**
- * Gets the latest toolCall id for a conversation
+ * Helper to get the latest tool call ID for a conversation
  */
 async function getLatestToolCallId(uid: string, conversationId: string): Promise<string | null> {
+  const snapshot = await adminDb
+    .collection("users")
+    .doc(uid)
+    .collection("conversations")
+    .doc(conversationId)
+    .collection("toolCalls")
+    .orderBy("createdAt", "desc")
+    .limit(1)
+    .get();
+    
+  if (snapshot.empty) return null;
+  return snapshot.docs[0].id;
+}
+
+/**
+ * GET endpoint for retrieving section titles
+ * /api/section?uid=...&conversationId=...
+ */
+export async function GET(req: NextRequest): Promise<Response> {
   try {
-    const snapshot = await adminDb
-      .collection("users")
-      .doc(uid)
-      .collection("conversations")
-      .doc(conversationId)
-      .collection("toolCalls")
-      .orderBy("createdAt", "desc")
-      .limit(1)
-      .get();
-
-    if (snapshot.empty) {
-      return null;
+    // Get query parameters
+    const url = new URL(req.url);
+    const uid = url.searchParams.get('uid');
+    const conversationId = url.searchParams.get('conversationId');
+    
+    // Validate required fields
+    if (!uid || !conversationId) {
+      return NextResponse.json(
+        { error: 'Missing required fields (uid, conversationId)' },
+        { status: 400 }
+      );
     }
-
-    return snapshot.docs[0].id;
+    
+    console.log(`Retrieving section titles for conversation: ${conversationId}`);
+    
+    // Get all section titles for this conversation
+    const titles = await retrieveSectionTitles(uid, conversationId);
+    
+    return NextResponse.json({
+      titles,
+      count: Object.keys(titles).length
+    });
+    
   } catch (error) {
-    console.error("Error getting latest toolCall:", error);
-    return null;
+    console.error('Error retrieving section titles:', error);
+    return NextResponse.json(
+      { error: 'Failed to retrieve section titles' },
+      { status: 500 }
+    );
   }
 }
 
+/**
+ * POST endpoint for retrieving a specific section
+ */
 export async function POST(req: NextRequest): Promise<Response> {
   try {
     // Parse request body
@@ -51,9 +84,9 @@ export async function POST(req: NextRequest): Promise<Response> {
     
     console.log(`Retrieving specific section: "${sectionId}"`);
     
-    // Handle "latest" toolCallId case
+    // Handle "latest" toolCallId case or no toolCallId provided
     let actualToolCallId = toolCallId;
-    if (toolCallId === "latest") {
+    if (!toolCallId || toolCallId === "latest") {
       const latestId = await getLatestToolCallId(uid, conversationId);
       if (!latestId) {
         return NextResponse.json(
@@ -99,10 +132,9 @@ export async function POST(req: NextRequest): Promise<Response> {
     });
     
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error('Error retrieving section:', errorMessage);
+    console.error('Error retrieving section:', error);
     return NextResponse.json(
-      { error: 'Internal server error: ' + errorMessage },
+      { error: 'Failed to retrieve section' },
       { status: 500 }
     );
   }

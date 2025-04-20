@@ -2,12 +2,18 @@
 import { processQueryWithGemini } from "./queryProcessor";
 import { queryOpenAIAssistant } from "./openaiAssistant";
 import { processAssistantText } from "./textExtractor";
-import { storeInTempBucket, retrieveFromTempBucket } from "./tempBucket";
 import type {
   LegalSearchChainOutput,
 } from "./types";
 import { DEBUG } from "./config";
-import { saveToolCallWithCounters, retrieveLawText } from "./toolCallStore";
+import { 
+  saveToolCallWithCounters, 
+  retrieveSectionTitles,
+  retrieveSectionText
+} from "./toolCallStore";
+
+// Re-export the section retrieval functions for use in the API
+export { retrieveSectionTitles, retrieveSectionText };
 
 export async function runLegalSearchChain({
   userQuery,
@@ -60,4 +66,3 @@ export async function runLegalSearchChain({
     };
   }
 }
-const logPrefix = "[SearchEngine Chain]";
