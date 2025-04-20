@@ -13,7 +13,6 @@ interface ChatShelfProps {
   onNewConversation: () => void;
   onDeleteConversation: (id: string) => void;
   onRenameConversation: (id: string, newTitle: string) => void;
-  onRenameConversation: (id: string, newTitle: string) => void;
 }
 
 const ChatShelf: React.FC<ChatShelfProps> = ({

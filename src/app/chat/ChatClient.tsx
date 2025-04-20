@@ -167,16 +167,21 @@ export default function ChatClient() {
     const unsubscribe = subscribeToConversationMessages(
       user.uid,
       conversationId,
-      (rawMsgs: RawMessageFromFirestore[]) => {
+      // msgs: Array<{ id: string; sender: string; text: string; timestamp: unknown; toolCallId?: string }>
+      msgs => {
         setIsInitialState(false);
         if (isBotReplyingRef.current) return;
-        const normalized = rawMsgs.map(m => ({
-          sender: m.sender,
-          text: m.text,
-          timestamp: m.timestamp?.toDate ? m.timestamp.toDate() : new Date(),
-          id: m.id,
-          toolCallId: m.toolCallId,
-        }));
+        const normalized = msgs.map(m => {
+          // Firestore Timestamp stored in m.timestamp may have toDate()
+          const ts = (m.timestamp as any)?.toDate?.();
+          return {
+            sender: m.sender as 'user' | 'bot',
+            text: m.text,
+            timestamp: ts instanceof Date ? ts : new Date(),
+            id: m.id,
+            toolCallId: m.toolCallId,
+          };
+        });
         setChatHistory(normalized);
       },
       err => console.error('Subscription error (messages):', err)
@@ -282,13 +287,13 @@ export default function ChatClient() {
     if (isInitialState) setIsInitialState(false);
 
     // Shelf update
-    if (isNewConvo) {
-      const firstWords = trimmedMessage.split(/\s+/).slice(0, 3).join(' ');
-      updateLocalShelf(convoId, firstWords);
-      updateConversationTitle(user.uid!, convoId, firstWords).catch(err => console.error('Error renaming conversation:', err));
-    } else {
-      updateLocalShelf(convoId);
-    }
+      if (isNewConvo) {
+        const firstWords = trimmedMessage.split(/\s+/).slice(0, 3).join(' ');
+        updateLocalShelf(convoId!, firstWords);
+        updateConversationTitle(user.uid, convoId!, firstWords).catch(err => console.error('Error renaming conversation:', err));
+      } else {
+        updateLocalShelf(convoId!);
+      }
 
     // Abort any old typing
     if (abortControllerRef.current) abortControllerRef.current.abort();
@@ -300,23 +305,25 @@ export default function ChatClient() {
     setSelectedFiles([]);
     if (textareaRef.current) textareaRef.current.style.height = '40px';
 
-    // Optimistically add user msg, then placeholder
+    // Optimistically add user message
     const userMsgId = `user_${Date.now()}`;
     setChatHistory(prev => [
       ...prev,
       { sender: 'user', text: trimmedMessage, timestamp: new Date(), id: userMsgId }
     ]);
-    let placeholderTimer: ReturnType<typeof setTimeout>;
+    // Insert placeholder bot message and timer
     const botResponseId = `bot_${Date.now()}`;
     setIsBotReplying(true);
     setChatHistory(prev => [
       ...prev,
       { sender: 'bot', text: ' ', wordsBatches: [], timestamp: new Date(), id: botResponseId }
     ]);
-    placeholderTimer = window.setTimeout(() => {
+    const placeholderTimer = window.setTimeout(() => {
       setChatHistory(prev =>
         prev.map(msg =>
-          msg.id === botResponseId ? { ...msg, text: translations.botTyping[language] || '...' } : msg
+          msg.id === botResponseId
+            ? { ...msg, text: translations.botTyping[language] || '...' }
+            : msg
         )
       );
     }, 500);
@@ -330,7 +337,7 @@ export default function ChatClient() {
 
     addMessageToConversation({
       uid: user.uid,
-      conversationId: convoId,
+      conversationId: convoId!,
       sender: 'user',
       text: trimmedMessage,
     }).catch(err => console.error('Error adding user message:', err));
@@ -356,7 +363,7 @@ export default function ChatClient() {
 
     // Streaming
     try {
-      const rawHistory = (await getConversationMessages(user.uid, convoId)) as Array<{ sender: 'user' | 'bot'; text: string }>;
+      const rawHistory = await getConversationMessages(user.uid, convoId!);
       const historyForApi = rawHistory.map(msg => ({
         role: msg.sender === 'user' ? 'user' : 'model',
         parts: [{ text: msg.text }]
@@ -366,7 +373,7 @@ export default function ChatClient() {
         history: historyForApi,
         files: filesPayload,
         uid: user.uid,
-        conversationId: convoId,
+        conversationId: convoId!,
       }, controller.signal);
       if (!response.ok) {
         const errorText = await response.text().catch(() => 'Could not read error details');
@@ -449,7 +456,7 @@ export default function ChatClient() {
 
       await addMessageToConversation({
         uid: user.uid,
-        conversationId: convoId,
+        conversationId: convoId!,
         sender: 'bot',
         text: textSoFar,
       });
@@ -700,7 +707,9 @@ export default function ChatClient() {
         onNewConversation={async () => {
           if (!user) return;
           const docRef = await createConversation(user.uid, translations.untitledChat[language]);
-          setConversationList(await getConversationList(user.uid));
+          setConversationList(
+            (await getConversationList(user.uid)).map(c => ({ id: c.id, title: (c as any).title || '' }))
+          );
           setConversationId(docRef.id);
           setChatHistory([]);
         }}

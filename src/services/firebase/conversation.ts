@@ -68,11 +68,28 @@ export function subscribeToConversationList(
   return unsubscribe;
 }
 
-export async function getConversationMessages(uid: string, conversationId: string) {
+export async function getConversationMessages(
+  uid: string,
+  conversationId: string
+): Promise<Array<{
+  id: string;
+  sender: 'user' | 'bot';
+  text: string;
+  timestamp: unknown;
+  toolCallId?: string;
+}>> {
   const messagesRef = collection(db, 'users', uid, 'conversations', conversationId, 'messages');
   const q = query(messagesRef, orderBy('timestamp', 'asc'));
   const snap = await getDocs(q);
-  return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  return snap.docs.map(doc => ({
+    id: doc.id,
+    ...(doc.data() as {
+      sender: 'user' | 'bot';
+      text: string;
+      timestamp: unknown;
+      toolCallId?: string;
+    }),
+  }));
 }
 /**
  * Subscribe to real-time updates of messages in a conversation.
