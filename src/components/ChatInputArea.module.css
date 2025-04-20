@@ -4,17 +4,20 @@
 .inputForm {
   display: flex;
   width: 100%;
-  align-items: center; /* Vertically align items */
-  padding: 0 8px; /* Add horizontal padding */
+  /* Align buttons and textarea vertically centered; ensures buttons stay vertically centered relative to textarea */
+  align-items: center;
+  /* Uniform horizontal padding; no vertical padding for slimmer box */
+  padding: 0px 8px;
+  /* Position relative to allow absolute placement of icons */
+  position: relative;
 }
 
 /* Wrapper around the textarea */
 .textareaWrapper {
   flex: 1; /* Allow textarea to grow */
-  margin: 6px 0; /* Vertical margin */
-  position: relative; /* If needed for future elements */
-  display: flex; /* Ensure alignment if other elements are added inside */
-  align-items: center;
+  /* Remove extra margins; padding on form handles spacing */
+  margin: 0;
+  position: relative;
 }
 
 /* Base styles for the textarea are in chat.module.css (styles.textareaBase) */
@@ -27,6 +30,12 @@
 .textareaInputWithFiles {
   /* Border-radius when files are selected (top corners sharp) */
   border-radius: 0 0 26px 26px;
+}
+/* Ensure textarea text does not overlap the action icons */
+.textareaInput,
+.textareaInputWithFiles {
+  /* Add right padding for icons (attachment, send/stop): button width (40px) + 2 * gap (8px) = 56px */
+  padding-right: 56px;
 }
 
 /* Hidden file input */

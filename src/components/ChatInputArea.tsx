@@ -39,6 +39,7 @@ const ChatInputArea = forwardRef<HTMLTextAreaElement, ChatInputAreaProps>(
 
     const handleTextareaInput = (e: React.FormEvent<HTMLTextAreaElement>) => {
       const target = e.target as HTMLTextAreaElement;
+      // Adjust height based on content
       target.style.height = '40px';
       const newHeight = Math.min(target.scrollHeight, 220);
       target.style.height = `${newHeight}px`;

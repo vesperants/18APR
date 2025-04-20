@@ -36,10 +36,13 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
   chatContainerRef,
   renderBotMessage
 }) => {
-  // Scroll to the bottom on new message
+  // Track whether auto-scroll is enabled; disable when user scrolls manually
+  const autoScrollEnabled = useRef<boolean>(true);
+  // Scroll to the bottom on new message if auto-scroll enabled
   useEffect(() => {
-    if (chatContainerRef?.current) {
-      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    const container = chatContainerRef?.current;
+    if (container && autoScrollEnabled.current) {
+      container.scrollTop = container.scrollHeight;
     }
   }, [chatHistory, isBotReplying, chatContainerRef]);
 
@@ -55,8 +58,19 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
     hr: () => <></>
   };
 
+  // Handle user scrolling: disable auto-scroll when not at bottom
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    const { scrollTop, scrollHeight, clientHeight } = el;
+    // If within 20px of bottom, consider at bottom
+    autoScrollEnabled.current = (scrollHeight - scrollTop - clientHeight) < 20;
+  };
   return (
-    <div ref={chatContainerRef} className={listStyles.scrollContainer}>
+    <div
+      ref={chatContainerRef}
+      className={listStyles.scrollContainer}
+      onScroll={handleScroll}
+    >
       <div className={messageWrapperClass.trim()}>
         {chatHistory.map((chat, index) => {
           const isUser = chat.sender === 'user';

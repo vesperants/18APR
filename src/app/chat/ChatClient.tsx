@@ -1,5 +1,3 @@
-// src/app/chat/ChatClient.tsx
-
 'use client';
 import React, { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -29,7 +27,7 @@ import {
 } from '@/services/firebase/conversation';
 import styles from './chat.module.css';
 
-// Type for raw messages from Firestore subscription
+// --- Types ---
 type RawMessageFromFirestore = {
   id: string;
   sender: 'user' | 'bot';
@@ -37,9 +35,7 @@ type RawMessageFromFirestore = {
   timestamp?: { toDate(): Date };
   toolCallId?: string;
 };
-// Conversation list item type
 type ConversationListItem = { id: string; title: string };
-
 interface SelectedFile { file: File; id: string; }
 type BotWord = { word: string; fading: boolean };
 interface ChatMessage {
@@ -54,7 +50,6 @@ interface ChatMessage {
 export default function ChatClient() {
   const BATCH_SIZE = 1;
   const FADE_DURATION_MS = 1200;
-
   const { user, loading, signOut } = useAuth();
   const { language } = useLanguage();
   const router = useRouter();
@@ -63,17 +58,12 @@ export default function ChatClient() {
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([]);
   const [isBotReplying, setIsBotReplying] = useState(false);
-  // Ref to track bot replying state in subscription listener
   const isBotReplyingRef = useRef<boolean>(false);
-  // Sync ref with state so subscription callback can read latest value
-  useEffect(() => {
-    isBotReplyingRef.current = isBotReplying;
-  }, [isBotReplying]);
-  // Always start in chat view without initial greeting overlay
+  useEffect(() => { isBotReplyingRef.current = isBotReplying; }, [isBotReplying]);
+
   const [isInitialState, setIsInitialState] = useState(true);
   const [isShelfOpen, setIsShelfOpen] = useState(false);
   const [inputAreaHeight, setInputAreaHeight] = useState(80);
-
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [showSignOutModal, setShowSignOutModal] = useState(false);
@@ -88,6 +78,30 @@ export default function ChatClient() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [conversationList, setConversationList] = useState<ConversationListItem[]>([]);
   const [onboardingDone, setOnboardingDone] = useState<boolean>(false);
+  const [checkingOnboarding, setCheckingOnboarding] = useState<boolean>(true);
+
+  // Scroll lock logic for manual scroll
+  const [autoScroll, setAutoScroll] = useState(true);
+  useEffect(() => {
+    const el = chatContainerRef.current;
+    if (!el) return;
+
+    const handleScroll = () => {
+      if (isBotReplyingRef.current && el) {
+        const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+        setAutoScroll(isNearBottom);
+      }
+    };
+    el.addEventListener('scroll', handleScroll, { passive: true });
+    return () => el.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  useEffect(() => {
+    if (autoScroll && chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  }, [chatHistory, isBotReplying, autoScroll]);
+
   // Optimistically reorder (and optionally rename) a conversation in the shelf
   const updateLocalShelf = (id: string, newTitle?: string) => {
     setConversationList(prev => {
@@ -97,19 +111,14 @@ export default function ChatClient() {
       return [{ id, title }, ...filtered];
     });
   };
-  const [checkingOnboarding, setCheckingOnboarding] = useState<boolean>(true);
 
-  // Add state for section modal
+  // Section modal logic
   const [sectionModalOpen, setSectionModalOpen] = useState(false);
   const [sectionContent, setSectionContent] = useState({ title: '', content: '', loading: false });
 
-  // Subscribe to conversation list and ensure onboarding
-  // Only subscribe once after auth succeeds; omit convoId/onboardingDone from deps intentionally
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Onboarding / conversation list subscription
   useEffect(() => {
-    // Wait for auth to initialize
     if (loading) return;
-    // Redirect unauthorized users
     if (!user || !user.emailVerified) {
       router.replace('/login');
       return;
@@ -133,13 +142,11 @@ export default function ChatClient() {
             }
             return;
           }
-      const mapped = convos.map(c => ({ id: c.id, title: c.title || '' }));
-      setConversationList(mapped);
-      // Do not auto-select existing conversations; wait for user action
-      setOnboardingDone(true);
-      setCheckingOnboarding(false);
+          const mapped = convos.map(c => ({ id: c.id, title: c.title || '' }));
+          setConversationList(mapped);
+          setOnboardingDone(true);
+          setCheckingOnboarding(false);
         } else {
-          // Keep conversation list updated
           setConversationList(convos.map(c => ({ id: c.id, title: c.title || '' })));
           if (!conversationId && convos.length) {
             setConversationId(convos[0].id);
@@ -154,16 +161,14 @@ export default function ChatClient() {
     return () => unsubscribe();
   }, [user, loading, router]);
 
-  // Subscribe to real-time updates for the active conversation's messages
+  // Messages subscription
   useEffect(() => {
     if (!conversationId || !user) return;
     const unsubscribe = subscribeToConversationMessages(
       user.uid,
       conversationId,
       (rawMsgs: RawMessageFromFirestore[]) => {
-        // Always show chat view; disable initial greeting overlay
         setIsInitialState(false);
-        // If a bot reply is in progress, do not override optimistic or streaming state
         if (isBotReplyingRef.current) return;
         const normalized = rawMsgs.map(m => ({
           sender: m.sender,
@@ -179,7 +184,59 @@ export default function ChatClient() {
     return () => unsubscribe();
   }, [conversationId, user]);
 
-  // Handle deleting a conversation
+  // Section modal handler
+  const handleSectionClick = async (sectionTitle: string, sectionId: string, msgId: string, toolCallId?: string) => {
+    const sectionText = sectionTitle.replace(/^\*?\s*Section(?:\s+\d+)?:\s*/, '').trim();
+    if (!user) return;
+    const message = chatHistory.find(msg => msg.id === msgId);
+    if (!message) return;
+    setSectionContent({
+      title: sectionText,
+      content: '',
+      loading: true
+    });
+    setSectionModalOpen(true);
+    try {
+      const response = await fetch('/api/section', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          uid: user.uid,
+          conversationId: conversationId || '',
+          toolCallId: toolCallId || 'latest',
+          sectionId: sectionId
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setSectionContent(prev => ({
+          ...prev,
+          content: `Error retrieving content: ${data.error || 'Unknown error'}`,
+          loading: false
+        }));
+        return;
+      }
+      setSectionContent(prev => ({
+        ...prev,
+        content: data.content || 'No content available',
+        loading: false
+      }));
+    } catch (error) {
+      setSectionContent(prev => ({
+        ...prev,
+        content: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        loading: false
+      }));
+    }
+  }
+  const handleCloseModal = () => {
+    setSectionModalOpen(false);
+    setTimeout(() => {
+      setSectionContent({ title: '', content: '', loading: false });
+    }, 300);
+  };
+
+  // Conversation CRUD
   const handleDeleteConversation = async (idToDelete: string) => {
     if (!user) return;
     if (!window.confirm('Are you sure you want to permanently delete this conversation?')) return;
@@ -195,7 +252,6 @@ export default function ChatClient() {
       alert('Failed to delete conversation.');
     }
   };
-  // Handle renaming a conversation
   const handleRenameConversation = async (idToRename: string, newTitle: string) => {
     if (!user) return;
     try {
@@ -206,12 +262,14 @@ export default function ChatClient() {
     }
   };
 
-  // Send message
+  // Send message (guard duplicate sends!)
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedMessage = message.trim();
     if (!user || (!trimmedMessage && selectedFiles.length === 0)) return;
-    // Create a new conversation if none exists (initial state)
+    if (isBotReplyingRef.current) return;
+    isBotReplyingRef.current = true;
+
     let convoId = conversationId;
     const isNewConvo = !convoId;
     if (isNewConvo) {
@@ -220,11 +278,10 @@ export default function ChatClient() {
       setConversationId(convoId);
     }
     const filesToProcess = selectedFiles;
-
     stopTypingRef.current = false;
-    // Hide initial greeting when starting conversation
     if (isInitialState) setIsInitialState(false);
-    // Immediate shelf update: bring this convo to top and rename if new
+
+    // Shelf update
     if (isNewConvo) {
       const firstWords = trimmedMessage.split(/\s+/).slice(0, 3).join(' ');
       updateLocalShelf(convoId, firstWords);
@@ -232,22 +289,23 @@ export default function ChatClient() {
     } else {
       updateLocalShelf(convoId);
     }
+
+    // Abort any old typing
     if (abortControllerRef.current) abortControllerRef.current.abort();
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
-    // Clear input UI immediately
+    // Clear input UI
     setMessage('');
     setSelectedFiles([]);
     if (textareaRef.current) textareaRef.current.style.height = '40px';
 
-    // Optimistic UI: add user message immediately, then placeholder bubble + autoscroll
+    // Optimistically add user msg, then placeholder
     const userMsgId = `user_${Date.now()}`;
     setChatHistory(prev => [
       ...prev,
       { sender: 'user', text: trimmedMessage, timestamp: new Date(), id: userMsgId }
     ]);
-    // Prepare bot placeholder: insert empty bubble, will show ellipses after delay
     let placeholderTimer: ReturnType<typeof setTimeout>;
     const botResponseId = `bot_${Date.now()}`;
     setIsBotReplying(true);
@@ -255,7 +313,6 @@ export default function ChatClient() {
       ...prev,
       { sender: 'bot', text: ' ', wordsBatches: [], timestamp: new Date(), id: botResponseId }
     ]);
-    // Show typing ellipses after 500ms if still waiting
     placeholderTimer = window.setTimeout(() => {
       setChatHistory(prev =>
         prev.map(msg =>
@@ -263,14 +320,14 @@ export default function ChatClient() {
         )
       );
     }, 500);
-    // Autoscroll to show the newly added bubbles
+
+    // Scroll immediately to bottom
     requestAnimationFrame(() => {
       if (chatContainerRef.current) {
         chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
       }
     });
 
-    // Add user message to Firestore
     addMessageToConversation({
       uid: user.uid,
       conversationId: convoId,
@@ -278,7 +335,7 @@ export default function ChatClient() {
       text: trimmedMessage,
     }).catch(err => console.error('Error adding user message:', err));
 
-    // Read files (if any)
+    // Read files if any
     let filesPayload: Awaited<ReturnType<typeof readFileAsBase64>>[] = [];
     try {
       filesPayload = await Promise.all(filesToProcess.map(f => readFileAsBase64(f.file)));
@@ -293,18 +350,17 @@ export default function ChatClient() {
         }
       ]);
       setIsBotReplying(false);
+      isBotReplyingRef.current = false;
       return;
     }
 
-    // Bot placeholder already added earlier; proceed with API call
+    // Streaming
     try {
-      // API HISTORY: Provide role/parts, but also send uid/conversationId!
       const rawHistory = (await getConversationMessages(user.uid, convoId)) as Array<{ sender: 'user' | 'bot'; text: string }>;
       const historyForApi = rawHistory.map(msg => ({
         role: msg.sender === 'user' ? 'user' : 'model',
         parts: [{ text: msg.text }]
       }));
-
       const response = await sendMessageToApi({
         message: message.trim(),
         history: historyForApi,
@@ -312,7 +368,6 @@ export default function ChatClient() {
         uid: user.uid,
         conversationId: convoId,
       }, controller.signal);
-
       if (!response.ok) {
         const errorText = await response.text().catch(() => 'Could not read error details');
         setChatHistory(prev =>
@@ -323,11 +378,12 @@ export default function ChatClient() {
           )
         );
         setIsBotReplying(false);
+        isBotReplyingRef.current = false;
         abortControllerRef.current = null;
         return;
       }
 
-      // --- Streaming batching logic
+      // Batched streaming
       const reader = response.body?.getReader();
       if (!reader) throw new Error('No reader found');
       const decoder = new TextDecoder();
@@ -345,7 +401,6 @@ export default function ChatClient() {
         }
         return { words: allWords, remainder };
       }
-
       let doneReading = false;
       while (!doneReading && !stopTypingRef.current) {
         const { done, value } = await reader.read();
@@ -367,6 +422,10 @@ export default function ChatClient() {
                   : msg
               ));
               pendingBatch = [];
+              // AUTOSCROLL if allowed
+              if (autoScroll && chatContainerRef.current) {
+                chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+              }
             }
           }
         }
@@ -387,7 +446,7 @@ export default function ChatClient() {
           prev.map(msg => msg.id === botResponseId ? { ...msg, text: textSoFar + ' (Stopped)' } : msg)
         );
       }
-      // Store bot reply in Firestore
+
       await addMessageToConversation({
         uid: user.uid,
         conversationId: convoId,
@@ -403,25 +462,28 @@ export default function ChatClient() {
         )
       );
     } finally {
-      // Clear typing ellipses timer
       clearTimeout(placeholderTimer);
       setIsBotReplying(false);
+      isBotReplyingRef.current = false;
       abortControllerRef.current = null;
     }
   };
 
+  // Stop generating (with ref)
   const handleStopGenerating = () => {
     if (abortControllerRef.current) abortControllerRef.current.abort();
     stopTypingRef.current = true;
     setIsBotReplying(false);
+    isBotReplyingRef.current = false;
   };
 
+  // Keyboard handling (guard duplicate/disabled while bot typing)
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (
       e.key === 'Enter' &&
       !e.shiftKey &&
       (message.trim() || selectedFiles.length > 0) &&
-      !isBotReplying
+      !isBotReplyingRef.current
     ) {
       e.preventDefault();
       const form = e.currentTarget.closest('form');
@@ -467,14 +529,19 @@ export default function ChatClient() {
     return () => clearTimeout(timeoutId);
   }, [message, selectedFiles, isInitialState]);
 
-  // Redirect unauthorized users to login
+  useEffect(() => {
+    if (!isInitialState && textareaRef.current) {
+      textareaRef.current.focus();
+      textareaRef.current.style.height = '40px';
+    }
+  }, [isInitialState]);
+
   useEffect(() => {
     if (!loading && (!user || !user.emailVerified)) {
       router.replace('/login');
     }
   }, [loading, user, router]);
 
-  // Show loading indicator during auth/language/onboarding initialization
   if (loading || !language || checkingOnboarding) {
     const loadingText = language
       ? translations.loading[language]
@@ -485,13 +552,11 @@ export default function ChatClient() {
       </div>
     );
   }
-
-  // While redirecting (unauthorized), render nothing
   if (!loading && (!user || !user.emailVerified)) {
     return null;
   }
 
-  // Strict batch-fading bot message renderer
+  // Streaming batches & section logic
   function BatchFade({ show, children, duration = 1000 }: { show: boolean, children: React.ReactNode, duration?: number }) {
     const [fadeState, setFadeState] = useState<'hidden' | 'fading' | 'shown'>(show ? 'fading' : 'hidden');
     useEffect(() => {
@@ -522,36 +587,24 @@ export default function ChatClient() {
     }
     return <span style={style}>{children}</span>;
   }
+
   const renderBotMessage = (msg: ChatMessage) => {
-    // Parse the message to find any section references regardless of wordsBatches
     const lines = msg.text.split('\n');
-    const hasSections = lines.some(line => 
-      /\*?\s*Section(?:\s+\d+)?:/.test(line.trim()) || 
+    const hasSections = lines.some(line =>
+      /\*?\s*Section(?:\s+\d+)?:/.test(line.trim()) ||
       /\b(P\d+-C\d+-S\d+)\b/.test(line)
     );
-    
     if (hasSections) {
-      console.log("Found sections in message:", msg.id); // Debug log
       return (
         <div>
           {lines.map((line, i) => {
-            // Check for section headers with P-C-S format (e.g., P3-C8-S169)
             const pcsSectionMatch = line.match(/\b(P\d+-C\d+-S\d+)\b/);
-            
-            // Check for section headers with the "Section:" or "Section 123:" format
             const regularSectionMatch = /\*?\s*Section(?:\s+\d+)?:/.test(line.trim());
-            
             if (pcsSectionMatch || regularSectionMatch) {
               const sectionTitle = line.trim();
-              console.log("Rendering section button:", sectionTitle); // Debug log
-              
-              // Extract display text and section identifier
               let displayText = sectionTitle;
               let sectionId = '';
-              
-              // For P-C-S format, use the actual title if available or just the P-C-S code
               if (pcsSectionMatch) {
-                // Get the text after the P-C-S code for display purposes
                 const afterPCS = line.split(pcsSectionMatch[1])[1];
                 if (afterPCS && afterPCS.trim()) {
                   displayText = afterPCS.trim();
@@ -559,23 +612,18 @@ export default function ChatClient() {
                     displayText = displayText.substring(1).trim();
                   }
                 }
-                
-                // For the section identifier, use the title text if possible, otherwise the P-C-S code
                 if (displayText && displayText.length > 5) {
                   sectionId = displayText;
                 } else {
                   sectionId = pcsSectionMatch[1];
                 }
               } else {
-                // For regular section format, use section title as both display and identifier
-                // Remove the "Section:" or "Section 123:" prefix for cleaner display
                 displayText = sectionTitle.replace(/^\*?\s*Section(?:\s+\d+)?:\s*/, '').trim();
                 sectionId = displayText;
               }
-              
               return (
                 <div key={i} className={styles.sectionLine}>
-                  <button 
+                  <button
                     className={styles.sectionButton}
                     onClick={() => handleSectionClick(sectionTitle, sectionId, msg.id || '', msg.toolCallId)}
                     title={`View full section: ${displayText}`}
@@ -592,103 +640,16 @@ export default function ChatClient() {
         </div>
       );
     }
-    
-    // If no sections found but has wordsBatches, use the standard rendering for streaming
     if (msg.wordsBatches && msg.wordsBatches.length > 0) {
       return msg.wordsBatches.map((batch, batchIdx) =>
         <BatchFade show={true} duration={FADE_DURATION_MS} key={batchIdx}>
           {batch.map((w, wi) => (
-            <span key={wi}>
-              {w.word}
-            </span>
+            <span key={wi}>{w.word}</span>
           ))}
         </BatchFade>
       );
     }
-    
-    // Otherwise just return the text
     return msg.text;
-  };
-
-  // Function to handle section button clicks
-  const handleSectionClick = async (sectionTitle: string, sectionId: string, msgId: string, toolCallId?: string) => {
-    // Extract section content - handles both "Section:" and "Section 123:" formats
-    const sectionContent = sectionTitle.replace(/^\*?\s*Section(?:\s+\d+)?:\s*/, '').trim();
-    
-    console.log(`Clicked section: "${sectionContent}" from message: ${msgId}`);
-    console.log("Using section identifier:", sectionId);
-    console.log("Using toolCallId:", toolCallId || "latest (fallback)");
-    
-    if (!user) {
-      console.log("User not authenticated");
-      return;
-    }
-
-    // Find the message that contains this section
-    const message = chatHistory.find(msg => msg.id === msgId);
-    if (!message) {
-      console.log("Message not found");
-      return;
-    }
-    
-    // Set the section title immediately and show loading state
-    setSectionContent({
-      title: sectionContent,
-      content: '',
-      loading: true
-    });
-    setSectionModalOpen(true);
-    
-    try {
-      // Make API call to get only this specific section
-      const response = await fetch('/api/section', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          uid: user.uid,
-          conversationId: conversationId || '',
-          toolCallId: toolCallId || "latest", // Use the specific toolCallId if available
-          sectionId: sectionId // Use the exact section identifier
-        }),
-      });
-      
-      const data = await response.json();
-      
-      if (!response.ok) {
-        console.error("Error fetching section:", data);
-        setSectionContent(prev => ({
-          ...prev,
-          content: `Error retrieving content: ${data.error || 'Unknown error'}`,
-          loading: false
-        }));
-        return;
-      }
-      
-      console.log("Section content received:", data);
-      
-      // Display only the specific section content
-      setSectionContent(prev => ({
-        ...prev,
-        content: data.content || 'No content available',
-        loading: false
-      }));
-    } catch (error) {
-      console.error("Error fetching section content:", error);
-      setSectionContent(prev => ({
-        ...prev,
-        content: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        loading: false
-      }));
-    }
-  };
-  
-  // Function to close the section modal
-  const handleCloseModal = () => {
-    setSectionModalOpen(false);
-    // Reset content after animation completes
-    setTimeout(() => {
-      setSectionContent({ title: '', content: '', loading: false });
-    }, 300);
   };
 
   return (
@@ -716,8 +677,6 @@ export default function ChatClient() {
           </div>
         </div>
       )}
-      
-      {/* Modals & overlays */}
       <ProfileModal open={profileModalOpen} onClose={() => setProfileModalOpen(false)} />
       <AccountMenuBubble
         open={accountMenuOpen}
@@ -732,7 +691,6 @@ export default function ChatClient() {
         onClose={() => setShowSignOutModal(false)}
         onConfirm={async () => { setShowSignOutModal(false); await signOut(); }}
       />
-      {/* Modal ChatShelf, overlays when open */}
       <ChatShelf
         isOpen={isShelfOpen}
         onClose={() => setIsShelfOpen(false)}
@@ -764,7 +722,7 @@ export default function ChatClient() {
             avatarButtonRef={avatarButtonRef}
           />
           <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
-            {/* Initial greeting overlay */}
+            {/* Initial greeting overlay (centered) */}
             <div style={{
               position: 'absolute', top: 'calc(50% - 140px)', left: '50%',
               transform: 'translateX(-50%)', width: '90%', maxWidth: '800px',
@@ -782,7 +740,6 @@ export default function ChatClient() {
               position: 'absolute', top: 0, left: 0, right: 0,
               bottom: isInitialState ? 0 : `${inputAreaHeight}px`,
               opacity: isInitialState ? 0 : 1,
-              // Faster reveal: no delay, complete fade in 0.5s alongside overlay fade
               transition: 'opacity 0.5s ease-in-out, bottom 0.3s ease-out',
               zIndex: 2
             }}>
@@ -797,17 +754,19 @@ export default function ChatClient() {
               />
             </div>
           </div>
-          {/* Input */}
-          <div
+        <div
             ref={inputAreaWrapperRef}
             style={{
-              position: 'absolute', left: '50%', width: '90%', maxWidth: '800px',
+              position: 'absolute',
+              left: '50%',
+              width: '90%',
+              maxWidth: '800px',
               bottom: isInitialState ? 'auto' : '35px',
               top: isInitialState ? '50%' : 'auto',
-              transform: 'translateX(-50%)' + (isInitialState ? ' translateY(-50%)' : ''),
-              // Disable slide animation after initial greeting for instant input placement
+              // Anchor only the top edge in initial state so the box grows downward
+              transform: 'translateX(-50%)',
               transition: isInitialState
-                ? 'top 0.5s linear, bottom 0.5s linear, transform 0.5s linear'
+                ? 'top 0.5s linear, bottom 0.5s linear'
                 : 'none',
               zIndex: 3
             }}>
