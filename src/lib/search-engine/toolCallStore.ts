@@ -1,10 +1,7 @@
 // src/lib/search-engine/toolCallStore.ts
-import { adminDb } from "@/services/firebase/admin";
-import { FieldValue } from "firebase-admin/firestore";
-
-// Firestore increment helper
-const firestoreFieldValue = FieldValue || 
-  (adminDb as { FieldValue?: typeof FieldValue }).FieldValue;
+// Use centralized Firebase Admin SDK initialization
+import { adminDb } from '@/services/firebase/admin';
+import { FieldValue as firestoreFieldValue } from 'firebase-admin/firestore';
 
 /**
  * Parses the content of a legal search result into structured sections

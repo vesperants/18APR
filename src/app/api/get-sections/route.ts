@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+// Ensure Firebase Admin SDK is initialized
+import '@/services/firebase/admin';
 import { getSectionsForToolCall } from '@/lib/search-engine/toolCallStore';
 
 export async function GET(req: NextRequest): Promise<Response> {
