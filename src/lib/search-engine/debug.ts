@@ -1,4 +1,5 @@
 import { adminDb } from "@/services/firebase/admin";
+import * as toolCallStore from './toolCallStore'; // Import as namespace to avoid conflicts
 
 /**
  * Checks if lawSections collection exists and returns stats about its contents
@@ -35,97 +36,44 @@ export async function getLawSectionsStats(uid: string, conversationId: string) {
 }
 
 /**
- * Simplest possible section parser using string splitting
+ * Simplified section parsing for debugging
  */
-export function simpleParseSections(content: string) {
+export function simpleParseSections(content: string): Record<string, { title: string, content: string }> {
   console.log("[DEBUG-SIMPLE] Content length:", content.length);
   console.log("[DEBUG-SIMPLE] Content preview:", content.substring(0, 200) + "...");
   
-  // Log pattern occurrences
-  const pcsCount = (content.match(/P\d+-C\d+-S\d+/g) || []).length;
-  const sectionHeaderCount = (content.match(/Section:/g) || []).length;
-  const markerCount = (content.match(/---- \[/g) || []).length;
+  const result: Record<string, { title: string, content: string }> = {};
   
-  console.log(`[DEBUG-SIMPLE] Pattern counts: PCS=${pcsCount}, Section=${sectionHeaderCount}, Markers=${markerCount}`);
+  // Simple regex to match P-C-S patterns and extract sections
+  const pcsMatches = content.match(/\b(P\d+-C\d+-S\d+)\b/g) || [];
   
-  // First try marker-based splitting
-  const sections: Record<string, { title: string, content: string }> = {};
-  let sectionIds: string[] = [];
+  // For debugging
+  console.log("[DEBUG-SIMPLE] Found PCS matches:", pcsMatches);
   
-  // Regex approach with capture groups to get sections
-  const markerPattern = /---- \[(P\d+-C\d+-S\d+)\] ----([\s\S]*?)(?=---- \[|$)/g;
-  let match;
-  while ((match = markerPattern.exec(content)) !== null) {
-    const pcsId = match[1];
-    const sectionContent = match[2].trim();
+  // Process the document and extract sections
+  const blocks = content.split(/\n\n(?=P\d+-C\d+-S\d+)/);
+  
+  // Simplified solution: split by double newlines and look for PCS identifiers
+  for (const block of blocks) {
+    const pcsMatch = block.match(/\b(P\d+-C\d+-S\d+)\b/);
+    if (!pcsMatch) continue;
     
-    // Extract title
-    const titleMatch = sectionContent.match(/Section: ([^\n]+)/);
-    const title = titleMatch ? titleMatch[1].trim() : '';
+    const pcsId = pcsMatch[1];
     
-    console.log(`[DEBUG-SIMPLE] Found marker section ${pcsId} with title: ${title}`);
+    // Extract section title
+    const titleMatch = block.match(/Section:\s*([^\n]+)/);
+    const title = titleMatch ? titleMatch[1].trim() : pcsId;
     
-    sections[pcsId] = { title, content: sectionContent };
-    sectionIds.push(pcsId);
+    // Just store the entire block as content for simplicity
+    const content = block.trim();
+    
+    // Add to result with proper type
+    result[pcsId] = { title, content };
   }
   
-  // Fallback: If no marker sections found, try direct PCS pattern
-  if (sectionIds.length === 0 && pcsCount > 0) {
-    console.log("[DEBUG-SIMPLE] No marker sections found, trying direct PCS pattern");
-    const directPattern = /(P\d+-C\d+-S\d+)([\s\S]*?)(?=P\d+-C\d+-S\d+|$)/g;
-    while ((match = directPattern.exec(content)) !== null) {
-      const pcsId = match[1];
-      const sectionContent = match[2].trim();
-      
-      // Extract title
-      const titleMatch = sectionContent.match(/Section: ([^\n]+)/);
-      const title = titleMatch ? titleMatch[1].trim() : '';
-      
-      console.log(`[DEBUG-SIMPLE] Found direct section ${pcsId} with title: ${title}`);
-      
-      sections[pcsId] = { title, content: sectionContent };
-      sectionIds.push(pcsId);
-    }
-  }
+  console.log("[DEBUG-SIMPLE] Extracted section count:", Object.keys(result).length);
   
-  // Fallback for manual splitting
-  if (sectionIds.length === 0 && markerCount > 0) {
-    console.log("[DEBUG-SIMPLE] Trying manual split by markers");
-    
-    // Manual split by markers
-    const parts = content.split(/---- \[(P\d+-C\d+-S\d+)\] ----/);
-    
-    // Skip the first part (it's before the first marker)
-    for (let i = 1; i < parts.length; i += 2) {
-      if (i+1 >= parts.length) break;
-      
-      const pcsId = parts[i];
-      const sectionContent = parts[i+1];
-      
-      // Extract title
-      const titleMatch = sectionContent?.match(/Section: ([^\n]+)/);
-      const title = titleMatch ? titleMatch[1].trim() : '';
-      
-      sections[pcsId] = {
-        title,
-        content: sectionContent?.trim() || ''
-      };
-      sectionIds.push(pcsId);
-    }
-  }
-  
-  return {
-    sections,
-    count: Object.keys(sections).length,
-    sectionIds: sectionIds,
-    titles: Object.fromEntries(Object.entries(sections).map(([id, data]) => [id, (data as { title: string }).title])),
-    debug: {
-      pcsCount,
-      sectionHeaderCount,
-      markerCount,
-      contentPreview: content.substring(0, 300)
-    }
-  };
+  return result;
 }
 
 /**
@@ -173,4 +121,61 @@ export function testParseSections(content: string) {
   console.log("[TEST-PARSE] Using simpler parsing method");
   // Use the simpler method for testing
   return simpleParseSections(content);
+}
+
+/**
+ * Test function to demonstrate how content extraction works
+ */
+export function testContentExtraction() {
+  // Example input text with Nepali legal content
+  const exampleText = `
+P4-C6-S325 Part: सम्पत्ति सम्बन्धी कानून Chapter: गुठी सम्बन्धी व्यवस्था Section: गुठी सञ्चालकको अयोग्यता Content: देहायको व्यक्ति गुठी सञ्चालक हुन योग्य हुने छैन :- Clause (क): करार गर्न अयोग्य भएको, Clause (ख): आफ्नो जिम्मामा रहेको सम्पत्ति हिनामिना गरेको, Clause (ग): भ्रष्टाचारको कसूरमा अदालतबाट दोषी ठहरिएको, Clause (घ): नैतिक पतन देखिने फौजदारी कसूरमा सजाय पाएको, Clause (ङ): गुठी सञ्चालन भएको सम्पत्तिको आफू मात्र हितग्राही भएको ।
+
+P4-C6-S336 Part: सम्पत्ति सम्बन्धी कानून Chapter: गुठी सम्बन्धी व्यवस्था Section: गुठीका लगत र अभिलेख Content: गुठीका लगत र अभिलेखहरू देहाय बमोजिम हुनेछन्:- Clause (क): गुठी संस्थान ऐन, २०३३ बमोजिम तयार गरिएको गुठीको श्रेस्ता, Clause (ख): गुठी रैतान नम्बरीमा परिणत भएका जग्गाको अभिलेख, Clause (ग): पहिलेदेखिको गुठीको रूपमा संरक्षण गरिएको गुठीको अभिलेख, Clause (घ): विभिन्न किसिमले गुठी संस्थानलाई प्राप्त भएका गुठीहरू, Clause (ङ): संस्थापित नयाँ गुठीको अभिलेख ।
+  `;
+
+  // Parse the content using the imported function from toolCallStore
+  const parsedSections = toolCallStore.parseContentSections(exampleText);
+
+  // Display the results
+  console.log('Parsed Sections:');
+  for (const [sectionId, section] of Object.entries(parsedSections)) {
+    console.log(`\n---------- Section ID: ${sectionId} ----------`);
+    console.log(`Title: ${section.title}`);
+    
+    // Show structural metadata
+    console.log('\nStructural Metadata:');
+    const metadata = {
+      partNumber: section.partNumber,
+      partTitle: section.partTitle,
+      chapterNumber: section.chapterNumber,
+      chapterTitle: section.chapterTitle,
+      sectionNumber: section.sectionNumber,
+      sectionTitle: section.sectionTitle,
+    };
+    
+    Object.entries(metadata).forEach(([key, value]) => {
+      if (value) console.log(`  ${key}: ${value}`);
+    });
+    
+    // Show node titles (should only contain structural elements now)
+    console.log('\nNode Titles (Only Structure):');
+    if (section.nodeTitles) {
+      Object.entries(section.nodeTitles).forEach(([key, value]) => {
+        console.log(`  ${key}: ${value}`);
+      });
+    }
+    
+    // Show content by itself (should not have metadata in it)
+    console.log('\nContent (Actual Legal Text):');
+    console.log(`  ${section.content}`);
+    
+    // Check if content properly contains clauses and other content elements
+    const hasClauseContent = section.content.includes('Clause');
+    console.log(`\nContent contains clauses: ${hasClauseContent ? 'YES ✓' : 'NO ✗'}`);
+    
+    console.log('-------------------------------------------');
+  }
+
+  return parsedSections;
 } 

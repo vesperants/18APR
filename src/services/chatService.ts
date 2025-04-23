@@ -14,9 +14,15 @@ interface SendToApiArgs {
 }
 export async function sendMessageToApi(
   { message, history, files, uid, conversationId }: SendToApiArgs,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  format: 'text' | 'json' = 'text'
 ): Promise<Response> {
-  return fetch('/api/chat', {
+  console.log('[Chat API Request]', { message, uid, conversationId, historyLength: history.length, filesCount: files.length, format });
+  
+  // Build URL with format parameter if json is requested
+  const url = format === 'json' ? '/api/chat?format=json' : '/api/chat';
+  
+  return fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message, history, files, uid, conversationId }),

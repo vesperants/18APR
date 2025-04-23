@@ -28,13 +28,6 @@ import {
 import styles from './chat.module.css';
 
 // --- Types ---
-type RawMessageFromFirestore = {
-  id: string;
-  sender: 'user' | 'bot';
-  text: string;
-  timestamp?: { toDate(): Date };
-  toolCallId?: string;
-};
 type ConversationListItem = { id: string; title: string };
 interface SelectedFile { file: File; id: string; }
 type BotWord = { word: string; fading: boolean };
@@ -45,6 +38,122 @@ interface ChatMessage {
   timestamp: Date;
   id?: string;
   toolCallId?: string;
+}
+
+// Improve the section cache structure with title-only and full content phases
+interface SectionTitle {
+  id: string;
+  title: string;
+  fileName: string;
+}
+
+interface SectionContent extends SectionTitle {
+  content: string;
+}
+
+interface SectionCache {
+  [toolCallId: string]: {
+    // Track loading state
+    titlesLoaded: boolean;
+    contentsLoading: boolean;
+    contentsLoaded: boolean;
+    // Fast lookup by ID
+    titles: {[sectionId: string]: SectionTitle};
+    contents: {[sectionId: string]: SectionContent};
+    // Organization by file
+    titlesByFile: {[fileName: string]: SectionTitle[]};
+    contentsByFile: {[fileName: string]: SectionContent[]};
+  };
+}
+
+// Hierarchical section structure from API
+interface HierarchicalSection {
+  blockId: string;
+  pcsId: string;
+  title: string;
+}
+
+interface HierarchicalChapter {
+  chapterId: string;
+  title: string;
+  sections: HierarchicalSection[];
+}
+
+interface HierarchicalPart {
+  partId: string;
+  title: string;
+  chapters: HierarchicalChapter[];
+}
+
+interface HierarchicalDocument {
+  documentId: string;
+  parts: HierarchicalPart[];
+}
+
+interface HierarchicalFile {
+  fileId: string;
+  title: string;
+  documents: HierarchicalDocument[];
+}
+
+interface HierarchicalSectionsResponse {
+  messageId: string;
+  conversationId: string;
+  toolCallId: string;
+  message: string;
+  files: HierarchicalFile[];
+}
+
+// Interface for hierarchical section content response
+interface SectionWithContent extends HierarchicalSection {
+  content: string;
+}
+
+interface ChapterWithContent extends HierarchicalChapter {
+  sections: SectionWithContent[];
+}
+
+interface PartWithContent extends HierarchicalPart {
+  chapters: ChapterWithContent[];
+}
+
+interface DocumentWithContent extends HierarchicalDocument {
+  parts: PartWithContent[];
+}
+
+interface FileWithContent extends HierarchicalFile {
+  documents: DocumentWithContent[];
+}
+
+interface HierarchicalContentsResponse {
+  success: boolean;
+  messageId: string;
+  conversationId: string;
+  toolCallId: string;
+  message: string;
+  files: FileWithContent[];
+}
+
+// Define interface for node type to replace 'any'
+interface HierarchyNodeDisplay {
+  nodeId: string;
+  nodeType: string;
+  nodeTitle: string;
+  content?: string;
+  children?: HierarchyNodeDisplay[];
+  metadata?: Record<string, string>;
+}
+
+interface DocumentDisplay {
+  documentId: string;
+  documentTitle?: string;
+  nodes?: HierarchyNodeDisplay[];
+  documentStructure?: {
+    format?: string;
+    levels?: string[];
+    levelSeparator?: string;
+    levelPrefixes?: Record<string, string>;
+  };
 }
 
 export default function ChatClient() {
@@ -116,6 +225,9 @@ export default function ChatClient() {
   const [sectionModalOpen, setSectionModalOpen] = useState(false);
   const [sectionContent, setSectionContent] = useState({ title: '', content: '', loading: false });
 
+  // Replace the old section cache with the new structured one
+  const [sectionCache, setSectionCache] = useState<SectionCache>({});
+
   // Onboarding / conversation list subscription
   useEffect(() => {
     if (loading) return;
@@ -172,14 +284,31 @@ export default function ChatClient() {
         setIsInitialState(false);
         if (isBotReplyingRef.current) return;
         const normalized = msgs.map(m => {
-          // Firestore Timestamp stored in m.timestamp may have toDate()
-          const ts = (m.timestamp as any)?.toDate?.();
+          // Fix for Firestore timestamp conversion with type guard
+          const ts = (m.timestamp && typeof (m.timestamp as { toDate?: () => Date }).toDate === 'function')
+            ? (m.timestamp as { toDate: () => Date }).toDate()
+            : new Date();
+
+          // --- BEGIN PATCH: Extract toolCallId from JSON text if not present ---
+          let toolCallId = m.toolCallId;
+          if (!toolCallId && typeof m.text === 'string') {
+            try {
+              const parsed = JSON.parse(m.text);
+              if (parsed && typeof parsed === 'object' && parsed.toolCallId) {
+                toolCallId = parsed.toolCallId;
+              }
+            } catch {
+              // Not JSON, ignore
+            }
+          }
+          // --- END PATCH ---
+
           return {
             sender: m.sender as 'user' | 'bot',
             text: m.text,
-            timestamp: ts instanceof Date ? ts : new Date(),
+            timestamp: ts,
             id: m.id,
-            toolCallId: m.toolCallId,
+            toolCallId,
           };
         });
         setChatHistory(normalized);
@@ -189,57 +318,300 @@ export default function ChatClient() {
     return () => unsubscribe();
   }, [conversationId, user]);
 
-  // Section modal handler
-  const handleSectionClick = async (sectionTitle: string, sectionId: string, msgId: string, toolCallId?: string) => {
-    const sectionText = sectionTitle.replace(/^\*?\s*Section(?:\s+\d+)?:\s*/, '').trim();
-    if (!user) return;
-    const message = chatHistory.find(msg => msg.id === msgId);
-    if (!message) return;
-    setSectionContent({
-      title: sectionText,
-      content: '',
-      loading: true
-    });
-    setSectionModalOpen(true);
+  // Find section in cache - with graceful fallbacks
+  const findSectionInCache = (toolCallId: string | undefined, sectionId: string): { 
+    title: SectionTitle | null; 
+    content: SectionContent | null;
+    isLoading: boolean;
+  } => {
+    if (!toolCallId || !sectionCache[toolCallId]) {
+      return { title: null, content: null, isLoading: false };
+    }
+    
+    const cache = sectionCache[toolCallId];
+    const title = cache.titles[sectionId] || null;
+    const content = cache.contents[sectionId] || null;
+    const isLoading = cache.contentsLoading && !cache.contentsLoaded;
+    
+    return { title, content, isLoading };
+  };
+  
+  // Load section titles (fast first phase)
+  const loadSectionTitles = async (toolCallId: string) => {
+    if (!user || !conversationId || !toolCallId) return;
+    
+    console.log(`[DEBUG] Loading section titles for tool call: ${toolCallId}`);
+    
     try {
-      const response = await fetch('/api/section', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          uid: user.uid,
-          conversationId: conversationId || '',
-          toolCallId: toolCallId || 'latest',
-          sectionId: sectionId
-        }),
-      });
-      const data = await response.json();
+      // Check if titles already loaded
+      if (sectionCache[toolCallId]?.titlesLoaded) {
+        console.log(`[DEBUG] Titles for tool call ${toolCallId} already in cache`);
+        return;
+      }
+      
+      // Initialize cache for this tool call if not exists
+      if (!sectionCache[toolCallId]) {
+        setSectionCache(prevCache => ({
+          ...prevCache,
+          [toolCallId]: {
+            titlesLoaded: false,
+            contentsLoading: false,
+            contentsLoaded: false,
+            titles: {},
+            contents: {},
+            titlesByFile: {},
+            contentsByFile: {}
+          }
+        }));
+      }
+      
+      // Fetch just the titles (fast)
+      const response = await fetch(`/api/sections?uid=${user.uid}&conversationId=${conversationId}&toolCallId=${toolCallId}`);
+      
       if (!response.ok) {
-        setSectionContent(prev => ({
-          ...prev,
-          content: `Error retrieving content: ${data.error || 'Unknown error'}`,
-          loading: false
+        console.error(`[DEBUG] Failed to fetch section titles: ${response.status} ${response.statusText}`);
+        return;
+      }
+      
+      const data = await response.json() as HierarchicalSectionsResponse;
+      console.log('[DEBUG] Received hierarchical sections data:', data);
+      
+      if (!data || !data.files || !Array.isArray(data.files) || data.files.length === 0) {
+        console.log(`[DEBUG] No section titles found for tool call ${toolCallId}`);
+        
+        // Mark as loaded even if empty
+        setSectionCache(prevCache => ({
+          ...prevCache,
+          [toolCallId]: {
+            ...(prevCache[toolCallId] || {
+              titles: {},
+              contents: {},
+              titlesByFile: {},
+              contentsByFile: {}
+            }),
+            titlesLoaded: true
+          }
         }));
         return;
       }
-      setSectionContent(prev => ({
-        ...prev,
-        content: data.content || 'No content available',
-        loading: false
+      
+      // Process hierarchical titles
+      const titles: {[sectionId: string]: SectionTitle} = {};
+      const titlesByFile: {[fileName: string]: SectionTitle[]} = {};
+      
+      // Process each file in the hierarchical structure
+      data.files.forEach((file: HierarchicalFile) => {
+        const fileName = file.fileId;
+        
+        // Initialize titlesByFile array for this file
+        if (!titlesByFile[fileName]) {
+          titlesByFile[fileName] = [];
+        }
+        
+        // Process each document in the file
+        file.documents.forEach((document: HierarchicalDocument) => {
+          // Process each part in the document
+          document.parts.forEach((part: HierarchicalPart) => {
+            // Process each chapter in the part
+            part.chapters.forEach((chapter: HierarchicalChapter) => {
+              // Process each section in the chapter
+              chapter.sections.forEach((section: HierarchicalSection) => {
+                const sectionId = section.pcsId;
+                
+                const sectionTitle: SectionTitle = {
+                  id: sectionId,
+                  title: section.title || '',
+                  fileName
+                };
+                
+                // Add to byId index
+                titles[sectionId] = sectionTitle;
+                
+                // Add to byFile index
+                titlesByFile[fileName].push(sectionTitle);
+              });
+            });
+          });
+        });
+      });
+      
+      // Update cache with titles
+      setSectionCache(prevCache => ({
+        ...prevCache,
+        [toolCallId]: {
+          ...(prevCache[toolCallId] || {
+            contents: {},
+            contentsByFile: {},
+            contentsLoading: false,
+            contentsLoaded: false
+          }),
+          titles,
+          titlesByFile,
+          titlesLoaded: true
+        }
       }));
+      
+      console.log(`[DEBUG] Cached ${Object.keys(titles).length} section titles across ${Object.keys(titlesByFile).length} documents`);
+      // --- ADDED: Log and trigger background fetch for all contents ---
+      console.log('[DEBUG] Triggering background fetch for all section contents for toolCallId:', toolCallId);
+      loadSectionContents(toolCallId);
     } catch (error) {
-      setSectionContent(prev => ({
-        ...prev,
-        content: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        loading: false
+      console.error('[DEBUG] Error loading section titles:', error);
+    }
+  };
+
+  // Load full section contents (background second phase)
+  const loadSectionContents = async (toolCallId: string) => {
+    if (!user || !conversationId || !toolCallId) return;
+    
+    try {
+      // Check if content already loaded or loading
+      if (sectionCache[toolCallId]?.contentsLoaded || sectionCache[toolCallId]?.contentsLoading) {
+        console.log(`[DEBUG] Section contents for ${toolCallId} already loaded or loading`);
+        return;
+      }
+      
+      console.log(`[DEBUG] Starting background load of section contents for tool call: ${toolCallId}`);
+      
+      // Mark as loading
+      setSectionCache(prevCache => ({
+        ...prevCache,
+        [toolCallId]: {
+          ...(prevCache[toolCallId] || {
+            titlesLoaded: false,
+            titles: {},
+            titlesByFile: {},
+            contents: {},
+            contentsByFile: {}
+          }),
+          contentsLoading: true
+        }
+      }));
+      
+      // Fetch full content in background
+      const response = await fetch(`/api/get-sections?uid=${user.uid}&conversationId=${conversationId}&toolCallId=${toolCallId}`);
+      
+      if (!response.ok) {
+        console.error(`[DEBUG] Failed to fetch section contents: ${response.status} ${response.statusText}`);
+        
+        // Mark as not loading but not loaded
+        setSectionCache(prevCache => ({
+          ...prevCache,
+          [toolCallId]: {
+            ...(prevCache[toolCallId] || {}),
+            contentsLoading: false
+          }
+        }));
+        return;
+      }
+      
+      const data = await response.json() as HierarchicalContentsResponse;
+      
+      if (!data.success || !data.files || !Array.isArray(data.files) || data.files.length === 0) {
+        console.log(`[DEBUG] No section contents found for tool call ${toolCallId}`);
+        
+        // Mark as loaded even if empty
+        setSectionCache(prevCache => ({
+          ...prevCache,
+          [toolCallId]: {
+            ...(prevCache[toolCallId] || {}),
+            contentsLoading: false,
+            contentsLoaded: true
+          }
+        }));
+        return;
+      }
+      
+      // Process hierarchical contents
+      const contents: {[sectionId: string]: SectionContent} = {};
+      const contentsByFile: {[fileName: string]: SectionContent[]} = {};
+      
+      // Process each file in the hierarchical structure
+      data.files.forEach((file: FileWithContent) => {
+        const fileName = file.fileId;
+        
+        // Initialize contentsByFile array for this file
+        if (!contentsByFile[fileName]) {
+          contentsByFile[fileName] = [];
+        }
+        
+        // Process each document in the file
+        file.documents.forEach((document: DocumentWithContent) => {
+          // Process each part in the document
+          document.parts.forEach((part: PartWithContent) => {
+            // Process each chapter in the part
+            part.chapters.forEach((chapter: ChapterWithContent) => {
+              // Process each section in the chapter
+              chapter.sections.forEach((section: SectionWithContent) => {
+                const sectionId = section.pcsId;
+                const content = section.content || '';
+                
+                const sectionContent: SectionContent = {
+                  id: sectionId,
+                  title: section.title || '',
+                  fileName,
+                  content
+                };
+                
+                // Add to byId index
+                contents[sectionId] = sectionContent;
+                
+                // Add to byFile index
+                contentsByFile[fileName].push(sectionContent);
+              });
+            });
+          });
+        });
+      });
+      
+      // Debug: print the fetched section contents
+      console.log(`[DEBUG] Background fetched section contents for toolCallId ${toolCallId}:`, contents);
+      
+      // Update cache with full content
+      setSectionCache(prevCache => ({
+        ...prevCache,
+        [toolCallId]: {
+          ...(prevCache[toolCallId] || {}),
+          contents,
+          contentsByFile,
+          contentsLoading: false,
+          contentsLoaded: true
+        }
+      }));
+      
+      console.log(`[DEBUG] Background loaded ${Object.keys(contents).length} section contents`);
+    } catch (error) {
+      console.error('[DEBUG] Error loading section contents:', error);
+      
+      // Mark as not loading
+      setSectionCache(prevCache => ({
+        ...prevCache,
+        [toolCallId]: {
+          ...(prevCache[toolCallId] || {}),
+          contentsLoading: false
+        }
       }));
     }
-  }
-  const handleCloseModal = () => {
-    setSectionModalOpen(false);
-    setTimeout(() => {
-      setSectionContent({ title: '', content: '', loading: false });
-    }, 300);
   };
+
+  // --- DEBUG: Trace toolCallId detection and background fetch trigger ---
+  useEffect(() => {
+    console.log('[DEBUG] useEffect: checking for new toolCallIds in chatHistory');
+    if (!user || !conversationId) return;
+    const checkedToolCallIds: string[] = [];
+    chatHistory.forEach(msg => {
+      if (msg.sender === 'bot') {
+        console.log('[DEBUG] Bot message:', msg);
+        console.log('[DEBUG] toolCallId:', msg.toolCallId, 'titlesLoaded:', msg.toolCallId ? sectionCache[msg.toolCallId]?.titlesLoaded : undefined);
+        if (msg.toolCallId) checkedToolCallIds.push(msg.toolCallId);
+      }
+      if (msg.sender === 'bot' && msg.toolCallId && !sectionCache[msg.toolCallId]?.titlesLoaded) {
+        console.log('[DEBUG] Found new toolCallId, calling loadSectionTitles:', msg.toolCallId);
+        loadSectionTitles(msg.toolCallId);
+      }
+    });
+    console.log('[DEBUG] Checked toolCallIds in this pass:', checkedToolCallIds);
+  }, [chatHistory, conversationId, user, sectionCache]);
 
   // Conversation CRUD
   const handleDeleteConversation = async (idToDelete: string) => {
@@ -374,7 +746,42 @@ export default function ChatClient() {
         files: filesPayload,
         uid: user.uid,
         conversationId: convoId!,
-      }, controller.signal);
+      }, controller.signal, 'json');
+      
+      // Now also log response as JSON for comparison
+      try {
+        const jsonData = await response.clone().json();
+        
+        // Log the full JSON response
+        console.log('API Response as JSON:', jsonData);
+        
+        // Specifically check for flexible hierarchy structure
+        if (jsonData.flexibleHierarchy) {
+          console.log('🔍 Flexible Hierarchy Structure (complete):', jsonData.flexibleHierarchy);
+          console.log(`📚 Documents in hierarchy: ${jsonData.flexibleHierarchy.documents?.length || 0}`);
+          
+          // More detailed debugging information
+          console.log('📊 Flexible Hierarchy Type:', typeof jsonData.flexibleHierarchy);
+          console.log('📊 Documents Type:', typeof jsonData.flexibleHierarchy.documents);
+          console.log('📊 Is Documents Array:', Array.isArray(jsonData.flexibleHierarchy.documents));
+          
+          // Log each document structure
+          if (jsonData.flexibleHierarchy.documents) {
+            jsonData.flexibleHierarchy.documents.forEach((doc: DocumentDisplay, i: number) => {
+              console.log(`📄 Document ${i+1}: ${doc.documentTitle || doc.documentId}`);
+              console.log(`  🌳 Nodes: ${doc.nodes?.length || 0}`);
+              
+              // Log the first few nodes to see their structure
+              if (doc.nodes && doc.nodes.length > 0) {
+                console.log('  First node sample:', doc.nodes[0]);
+              }
+            });
+          }
+        }
+      } catch (e) {
+        console.log('Could not parse response as JSON', e);
+      }
+      
       if (!response.ok) {
         const errorText = await response.text().catch(() => 'Could not read error details');
         setChatHistory(prev =>
@@ -399,6 +806,9 @@ export default function ChatClient() {
       let pendingBatch: BotWord[] = [];
       let allBatches: BotWord[][] = [];
 
+      // Add console log to view the response in browser
+      console.log('API Response Object:', response);
+      
       function extractWords(input: string) {
         const matches = Array.from(input.matchAll(/([^\s]+[\s]*)/g));
         const allWords = matches.map(m => m[0]);
@@ -438,6 +848,9 @@ export default function ChatClient() {
         }
         await new Promise(res => setTimeout(res, 2));
       }
+      // Log the complete text when finished
+      console.log('Complete Response Text:', textSoFar);
+      
       if (buffer.length > 0) pendingBatch.push({ word: buffer, fading: false });
       if (pendingBatch.length > 0) {
         allBatches = [...allBatches, pendingBatch];
@@ -549,6 +962,63 @@ export default function ChatClient() {
     }
   }, [loading, user, router]);
 
+  // --- ADDED: useEffect to auto-update modal when content arrives ---
+  React.useEffect(() => {
+    // Only run effect if modal is open and loading
+    if (!sectionModalOpen || !sectionContent.loading) return;
+    // Find the latest content in cache
+    const toolCallId = chatHistory.find(msg => msg.sender === 'bot' && msg.toolCallId)?.toolCallId;
+    if (!toolCallId) return;
+    const { content } = findSectionInCache(toolCallId, sectionContent.title);
+    if (content) {
+      setSectionContent({
+        title: content.title || sectionContent.title,
+        content: content.content,
+        loading: false
+      });
+    }
+  }, [sectionCache, sectionModalOpen, sectionContent, chatHistory]);
+
+  // Helper: build nested nodes based on documentStructure levels and metadata
+  const buildHierarchy = (doc: DocumentDisplay): HierarchyNodeDisplay[] => {
+    const levels = doc.documentStructure?.levels || [];
+    const items = doc.nodes || [];
+    // If no structure, just return flat list
+    if (!levels || levels.length === 0) return items;
+
+    // Recursive grouping function
+    const groupByLevel = (
+      nodes: HierarchyNodeDisplay[],
+      levelIndex: number
+    ): HierarchyNodeDisplay[] => {
+      // If at last level, return raw nodes (no additional grouping)
+      if (levelIndex >= levels.length - 1) {
+        return nodes;
+      }
+      const levelName = levels[levelIndex];
+      const keyName = `${levelName}Title`;
+      const map = new Map<string, HierarchyNodeDisplay[]>();
+      nodes.forEach(node => {
+        const title = node.metadata?.[keyName] || 'Untitled';
+        const bucket = map.get(title) || [];
+        bucket.push(node);
+        map.set(title, bucket);
+      });
+      const result: HierarchyNodeDisplay[] = [];
+      map.forEach((groupNodes, title) => {
+        const groupNode: HierarchyNodeDisplay = {
+          nodeId: `${levelName}_${title}`,
+          nodeType: levelName,
+          nodeTitle: title,
+          children: groupByLevel(groupNodes, levelIndex + 1),
+        };
+        result.push(groupNode);
+      });
+      return result;
+    };
+    return groupByLevel(items, 0);
+  };
+
   if (loading || !language || checkingOnboarding) {
     const loadingText = language
       ? translations.loading[language]
@@ -596,78 +1066,178 @@ export default function ChatClient() {
   }
 
   const renderBotMessage = (msg: ChatMessage) => {
-    const lines = msg.text.split('\n');
-    const hasSections = lines.some(line =>
-      /\*?\s*Section(?:\s+\d+)?:/.test(line.trim()) ||
-      /\b(P\d+-C\d+-S\d+)\b/.test(line)
-    );
-    if (hasSections) {
-      return (
-        <div>
-          {lines.map((line, i) => {
-            const pcsSectionMatch = line.match(/\b(P\d+-C\d+-S\d+)\b/);
-            const regularSectionMatch = /\*?\s*Section(?:\s+\d+)?:/.test(line.trim());
-            if (pcsSectionMatch || regularSectionMatch) {
-              const sectionTitle = line.trim();
-              let displayText = sectionTitle;
-              let sectionId = '';
-              if (pcsSectionMatch) {
-                const afterPCS = line.split(pcsSectionMatch[1])[1];
-                if (afterPCS && afterPCS.trim()) {
-                  displayText = afterPCS.trim();
-                  if (displayText.startsWith('-')) {
-                    displayText = displayText.substring(1).trim();
-                  }
-                }
-                if (displayText && displayText.length > 5) {
-                  sectionId = displayText;
-                } else {
-                  sectionId = pcsSectionMatch[1];
-                }
-              } else {
-                displayText = sectionTitle.replace(/^\*?\s*Section(?:\s+\d+)?:\s*/, '').trim();
-                sectionId = displayText;
-              }
+    // Try to parse as JSON first to detect structured responses
+    try {
+      const parsedData = JSON.parse(msg.text);
+
+      // Support fileContents response format
+      if (
+        parsedData.fileContents &&
+        typeof parsedData.fileContents === 'object'
+      ) {
+        // Cast to typed structure
+        const fileContents = parsedData.fileContents as Record<
+          string,
+          { sections?: Record<string, { content: string }> }
+        >;
+        return (
+          <div className="flex flex-col space-y-4 p-3 border rounded bg-green-50">
+            <h3 className="font-bold text-lg">File Contents</h3>
+            {Object.entries(fileContents).map(([fileName, fileData]) => {
+              const sections = fileData.sections || {};
               return (
-                <div key={i} className={styles.sectionLine}>
-                  <button
-                    className={styles.sectionButton}
-                    onClick={() => handleSectionClick(sectionTitle, sectionId, msg.id || '', msg.toolCallId)}
-                    title={`View full section: ${displayText}`}
-                    aria-label={`View section: ${displayText}`}
-                  >
-                    {displayText}
-                  </button>
+                <div key={fileName} className="p-3 border rounded bg-white">
+                  <h4 className="font-bold text-md">{fileName}</h4>
+                  {Object.entries(sections).map(([sectionId, section]) => (
+                    <div key={sectionId} className="mt-2">
+                      <h5 className="font-medium">{sectionId}</h5>
+                      <div className="text-sm text-gray-700 whitespace-pre-wrap">{section.content}</div>
+                    </div>
+                  ))}
                 </div>
               );
-            } else {
-              return <div key={i}>{line}</div>;
-            }
-          })}
-        </div>
-      );
+            })}
+          </div>
+        );
+      }
+
+      // Check specifically for flexible hierarchy response
+      if (parsedData.documents && Array.isArray(parsedData.documents)) {
+        // Handler for section clicks
+        const handleHierarchyNodeClick = (title: string, content: string) => {
+          setSectionContent({
+            title,
+            content,
+            loading: false
+          });
+          setSectionModalOpen(true);
+        };
+
+        return (
+          <div className="flex flex-col space-y-4 p-3 border rounded bg-blue-50 w-full max-w-full overflow-hidden">
+            <h3 className="font-bold text-lg">Hierarchical Legal Structure</h3>
+            {(parsedData.documents as DocumentDisplay[]).map((doc: DocumentDisplay, docIdx: number) => {
+              const roots = buildHierarchy(doc);
+              return (
+                <div key={docIdx} className="p-3 border rounded bg-white w-full overflow-hidden">
+                  <h4 className="font-bold text-md">{doc.documentTitle || `Document ${docIdx + 1}`}</h4>
+                  {roots.length > 0 ? (
+                    <div className="mt-2 w-full overflow-hidden">
+                      <RenderHierarchyNodes 
+                        nodes={roots} 
+                        onSectionClick={handleHierarchyNodeClick}
+                      />
+                    </div>
+                  ) : (
+                    <p className="text-gray-500 italic">No sections available</p>
+                  )}
+                </div>
+              );
+            })}
+            <div className="mt-4 text-xs text-gray-500">
+              <p>Tool Call ID: {parsedData.toolCallId}</p>
+              <p>Documents: {parsedData.documents?.length || 0}</p>
+            </div>
+          </div>
+        );
+      }
+      
+      // If not a special format but still JSON, display it as a structured message
+      if (typeof parsedData === 'object') {
+        // Check if it's a message with typical fields
+        if (parsedData.message && parsedData.timestamp) {
+          return (
+            <div className="flex flex-col space-y-2">
+              <div className="text-md font-medium">{parsedData.message}</div>
+              {parsedData.conversationId && (
+                <div className="text-xs text-gray-500 mt-1">
+                  <p>{new Date(parsedData.timestamp).toLocaleString()}</p>
+                </div>
+              )}
+            </div>
+          );
+        } else {
+          // Just render as JSON for other object types
+          return (
+            <div className="text-xs text-gray-700 whitespace-pre-wrap overflow-auto max-h-[500px] p-2 bg-gray-50 rounded">
+              <pre>{JSON.stringify(parsedData, null, 2)}</pre>
+            </div>
+          );
+        }
+      }
+    } catch (error) {
+      // Not JSON or not a structured response, continue with normal rendering
+      console.log('[DEBUG] Failed to parse message as JSON:', error);
     }
+    
+    // Handle streaming batches if present
     if (msg.wordsBatches && msg.wordsBatches.length > 0) {
       return msg.wordsBatches.map((batch, batchIdx) =>
         <BatchFade show={true} duration={FADE_DURATION_MS} key={batchIdx}>
-          {batch.map((w, wi) => (
-            <span key={wi}>{w.word}</span>
-          ))}
+          {batch.map((w, wi) => <span key={wi}>{w.word}</span>)}
         </BatchFade>
       );
     }
-    return msg.text;
+
+    // Fallback: render plain text
+    return <div className="whitespace-pre-wrap text-gray-900">{msg.text}</div>;
   };
+
+  // Render hierarchy nodes with nesting: parts -> chapters -> sections
+  function RenderHierarchyNodes({
+    nodes,
+    level = 0,
+    onSectionClick,
+  }: {
+    nodes: HierarchyNodeDisplay[];
+    level?: number;
+    onSectionClick: (title: string, content: string) => void;
+  }) {
+    return (
+      <div className="w-full overflow-hidden">
+        {nodes.map(node => (
+          <div
+            key={node.nodeId}
+            style={{ marginLeft: level * 16, width: `calc(100% - ${level * 16}px)` }}
+            className="overflow-hidden mb-2"
+          >
+            {node.children?.length === 0 ? (
+              <div
+                className={`${styles.sectionButton} mb-2 max-w-full overflow-hidden text-ellipsis`}
+                onClick={() => onSectionClick(
+                  node.nodeTitle,
+                  node.content || 'No content available')}
+              >
+                {node.nodeTitle}
+              </div>
+            ) : (
+              <div className="font-semibold mt-3 mb-2 max-w-full overflow-hidden text-ellipsis">
+                {node.nodeTitle}
+              </div>
+            )}
+            
+            {node.children && node.children.length > 0 && (
+              <RenderHierarchyNodes 
+                nodes={node.children} 
+                level={level + 1} 
+                onSectionClick={onSectionClick}
+              />
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <>
       {/* Section Content Modal */}
       {sectionModalOpen && (
-        <div className={styles.modalOverlay} onClick={handleCloseModal}>
+        <div className={styles.modalOverlay} onClick={() => { setSectionModalOpen(false); setSectionContent({ title: '', content: '', loading: false }); }}>
           <div className={styles.sectionModal} onClick={e => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <h3>{sectionContent.title}</h3>
-              <button className={styles.closeButton} onClick={handleCloseModal}>×</button>
+              <button className={styles.closeButton} onClick={() => { setSectionModalOpen(false); setSectionContent({ title: '', content: '', loading: false }); }}>×</button>
             </div>
             <div className={styles.modalContent}>
               {sectionContent.loading ? (
@@ -708,7 +1278,7 @@ export default function ChatClient() {
           if (!user) return;
           const docRef = await createConversation(user.uid, translations.untitledChat[language]);
           setConversationList(
-            (await getConversationList(user.uid)).map(c => ({ id: c.id, title: (c as any).title || '' }))
+            (await getConversationList(user.uid)).map((c: { id: string; title?: string }) => ({ id: c.id, title: c.title || '' }))
           );
           setConversationId(docRef.id);
           setChatHistory([]);

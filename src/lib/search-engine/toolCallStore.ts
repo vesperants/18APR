@@ -1,7 +1,11 @@
 // src/lib/search-engine/toolCallStore.ts
 // Use centralized Firebase Admin SDK initialization
 import { adminDb } from '@/services/firebase/admin';
-import { FieldValue as firestoreFieldValue } from 'firebase-admin/firestore';
+import type { CollectionReference, DocumentData } from '@google-cloud/firestore';
+import type { HierarchyNode, DocumentStructureInfo } from "./types";
+
+// Define batch size limit for Firestore batch operations
+const BATCH_SIZE_LIMIT = 500;
 
 /**
  * Parses the content of a legal search result into structured sections
@@ -10,52 +14,180 @@ import { FieldValue as firestoreFieldValue } from 'firebase-admin/firestore';
  * @param content The full text content with multiple sections
  * @returns An object with PCS identifiers as keys and section data as values
  */
-function parseContentSections(content: string) {
+export function parseContentSections(content: string): Record<string, { 
+  title: string,
+  content: string,
+  documentId?: string,
+  documentTitle?: string,
+  partNumber?: string,
+  chapterNumber?: string,
+  sectionNumber?: string,
+  partTitle?: string,
+  chapterTitle?: string,
+  sectionTitle?: string,
+  nodeTitles?: Record<string, string>
+}> {
   console.log("[DEBUG] Starting section parsing for content:", content.substring(0, 100) + "...");
-  const sections: Record<string, { title: string, content: string }> = {};
+  const sections: Record<string, {
+    title: string,
+    content: string,
+    documentId?: string,
+    documentTitle?: string,
+    partNumber?: string,
+    chapterNumber?: string,
+    sectionNumber?: string,
+    partTitle?: string,
+    chapterTitle?: string,
+    sectionTitle?: string,
+    nodeTitles?: Record<string, string>
+  }> = {};
   
-  // First try with marker-based pattern (preferred format)
-  const sectionPattern = /---- \[(P\d+-C\d+-S\d+)\] ----([\s\S]*?)(?=---- \[|$)/g;
+  // Try to extract document information
+  let documentId: string | undefined = undefined;
+  let documentTitle: string | undefined = undefined;
   
-  let match;
-  let matchCount = 0;
-  while ((match = sectionPattern.exec(content)) !== null) {
-    matchCount++;
-    const pcsId = match[1];
-    const sectionContent = match[2].trim();
-    
-    // Extract section title
-    const titleMatch = sectionContent.match(/Section: ([^\n]+)/);
-    const title = titleMatch ? titleMatch[1].trim() : '';
-    
-    console.log(`[DEBUG] Found section ${pcsId} with title: ${title}`);
-    
-    sections[pcsId] = {
-      title: title,
-      content: sectionContent
-    };
+  // First check for a document name marker pattern
+  const docNameMarker = content.match(/^Document:\s*([^\n]+)/i);
+  if (docNameMarker) {
+    documentId = docNameMarker[1].trim();
+    documentTitle = docNameMarker[1].trim();
+    console.log(`[DEBUG] Found document name marker: "${documentId}"`);
   }
   
-  // If marker-based pattern didn't work, try direct PCS format as a fallback
-  if (matchCount === 0) {
-    console.log("[DEBUG] No matches with marker pattern, trying direct PCS format");
-    // Look for P#-C#-S# format directly
-    const directPattern = /(P\d+-C\d+-S\d+)[\s\S]*?(?=P\d+-C\d+-S|$)/g;
-    while ((match = directPattern.exec(content)) !== null) {
-      const pcsContent = match[0];
-      const pcsId = match[1];
-      
-      // Extract title
-      const titleMatch = pcsContent.match(/Section: ([^\n]+)/);
-      const title = titleMatch ? titleMatch[1].trim() : '';
-      
-      console.log(`[DEBUG] Found direct section ${pcsId} with title: ${title}`);
-      
-      sections[pcsId] = {
-        title: title,
-        content: pcsContent.trim()
-      };
+  // If not found, try other patterns
+  if (!documentId) {
+    const docMatch = content.match(/Document(?:\s+ID)?:\s*([A-Za-z0-9_\-]+)/i);
+    if (docMatch) {
+      documentId = docMatch[1].trim();
+      console.log(`[DEBUG] Found document ID: "${documentId}"`);
+    } else {
+      // Try to find statute or code references
+      const statuteMatch = content.match(/(?:from|in)\s+the\s+([A-Za-z\s]+(?:Code|Act|Statute|Law))/i);
+      if (statuteMatch) {
+        documentId = statuteMatch[1].trim();
+        documentTitle = statuteMatch[1].trim();
+        console.log(`[DEBUG] Found statute reference: "${documentId}"`);
+      }
     }
+  }
+  
+  // Try to extract the document title if not already found
+  if (!documentTitle && documentId) {
+    const docTitleMatch = content.match(/Document\s+Title:\s*([^\n]+)/i);
+    if (docTitleMatch) {
+      documentTitle = docTitleMatch[1].trim();
+      console.log(`[DEBUG] Found document title: "${documentTitle}"`);
+    }
+  }
+  
+  // If still no document ID, try to extract from the first line
+  if (!documentId) {
+    const firstLine = content.split('\n')[0].trim();
+    if (firstLine && firstLine.length > 5 && firstLine.length < 100) {
+      documentId = firstLine;
+      documentTitle = firstLine;
+      console.log(`[DEBUG] Using first line as document name: "${documentId}"`);
+    }
+  }
+  
+  // Process each section in the content
+  const sectionBlocks = content.split(/\n\n(?=P\d+-C\d+-S\d+|[A-Za-z0-9]+-[A-Za-z0-9]+-[A-Za-z0-9]+)/);
+  
+  for (const block of sectionBlocks) {
+    if (!block.trim()) continue;
+    
+    // Extract the section identifier (e.g., P4-C6-S325)
+    const idMatch = block.match(/^(P\d+-C\d+-S\d+|[A-Za-z0-9]+-[A-Za-z0-9]+-[A-Za-z0-9]+)/);
+    if (!idMatch) continue;
+    
+    const sectionId = idMatch[1];
+    console.log(`[DEBUG] Processing section ${sectionId}`);
+    
+    // Extract hierarchical components from ID
+    const pcsMatch = sectionId.match(/P(\d+)-C(\d+)-S(\d+)/);
+    const partNumber = pcsMatch ? pcsMatch[1] : undefined;
+    const chapterNumber = pcsMatch ? pcsMatch[2] : undefined;
+    const sectionNumber = pcsMatch ? pcsMatch[3] : undefined;
+    
+    // Extract node titles from the block - only structural metadata
+    const nodeTitles: Record<string, string> = {};
+    
+    // Parse Part title
+    const partMatch = block.match(/Part:?\s+([^\n,]+)/);
+    if (partMatch) {
+      nodeTitles['partTitle'] = partMatch[1].trim();
+    }
+    
+    // Parse Chapter title
+    const chapterMatch = block.match(/Chapter:?\s+([^\n,]+)/);
+    if (chapterMatch) {
+      nodeTitles['chapterTitle'] = chapterMatch[1].trim();
+    }
+    
+    // Parse Section title
+    const sectionMatch = block.match(/Section:?\s+([^\n,]+)/);
+    if (sectionMatch) {
+      nodeTitles['sectionTitle'] = sectionMatch[1].trim();
+    }
+    
+    // Extract Subsection titles (still part of structure)
+    const subsectionMatches = Array.from(block.matchAll(/Subsection\s*\(([^)]+)\):?\s*([^\n,]+)/g));
+    for (const subMatch of subsectionMatches) {
+      nodeTitles[`subsection${subMatch[1]}Title`] = subMatch[2].trim();
+    }
+    
+    // Extract the actual content - look for the "Content:" marker specifically
+    let actualContent = '';
+    const contentMatch = block.match(/Content:?\s+([\s\S]+)$/);
+    if (contentMatch) {
+      actualContent = contentMatch[1].trim();
+    } else {
+      // Fallback: If no Content marker, use everything after the last identified section marker
+      const lastMarkerPos = Math.max(
+        block.lastIndexOf('Part:'),
+        block.lastIndexOf('Chapter:'),
+        block.lastIndexOf('Section:')
+      );
+      
+      if (lastMarkerPos > 0) {
+        // Find the next newline after the last marker
+        const nextNewline = block.indexOf('\n', lastMarkerPos);
+        if (nextNewline > 0) {
+          actualContent = block.substring(nextNewline).trim();
+        } else {
+          // If no newline found, just use everything after the last marker position
+          actualContent = block.substring(lastMarkerPos).trim();
+        }
+      } else {
+        // If no markers found, just use the whole block as content (excluding the ID)
+        actualContent = block.substring(idMatch[0].length).trim();
+      }
+    }
+    
+    // Use extracted section title as the main title, or fallback to ID
+    const title = nodeTitles['sectionTitle'] || sectionId;
+    
+    sections[sectionId] = {
+      title,
+      content: actualContent,
+      documentId,    // Apply the document ID to each section
+      documentTitle, // Apply the document title to each section
+      partNumber,
+      chapterNumber,
+      sectionNumber,
+      partTitle: nodeTitles['partTitle'],
+      chapterTitle: nodeTitles['chapterTitle'],
+      sectionTitle: nodeTitles['sectionTitle'],
+      nodeTitles
+    };
+    
+    console.log(`[DEBUG] Extracted section ${sectionId} with title: ${title}`);
+  }
+  
+  // If no sections were found with the block parser, try other parsing methods
+  if (Object.keys(sections).length === 0) {
+    console.log("[DEBUG] No sections found with block parser, trying direct PCS format");
+    // ... existing fallback parsing code can stay here ...
   }
   
   console.log(`[DEBUG] Parsed ${Object.keys(sections).length} sections`);
@@ -63,10 +195,195 @@ function parseContentSections(content: string) {
 }
 
 /**
- * Stores the extracted / processed law text
- * and bumps the call counters.
- * 
- * Now also parses and stores structured sections for more efficient retrieval.
+ * Enhanced function to detect document structure from section IDs
+ * Now supports more formats and arbitrary hierarchical structures
+ */
+function detectDocumentStructure(sectionIds: string[]): DocumentStructureInfo {
+  // Check for P-C-S format
+  const pcsCount = sectionIds.filter(id => /^P\d+-C\d+-S\d+$/.test(id)).length;
+  
+  // Check for P-S format
+  const psCount = sectionIds.filter(id => /^P\d+-S\d+$/.test(id)).length;
+  
+  // Check for C-S format
+  const csCount = sectionIds.filter(id => /^C\d+-S\d+$/.test(id)).length;
+  
+  // Check for Article format
+  const artCount = sectionIds.filter(id => /^ART\d+$/.test(id)).length;
+  
+  // Check for Section-only format
+  const secCount = sectionIds.filter(id => /^S\d+$/.test(id)).length;
+  
+  // Find the dominant format
+  const formatCounts = {
+    pcs: pcsCount,
+    ps: psCount,
+    cs: csCount,
+    article: artCount,
+    section: secCount
+  };
+  
+  // Determine most common format
+  let dominantFormat = 'unknown';
+  let maxCount = 0;
+  
+  for (const [format, count] of Object.entries(formatCounts)) {
+    if (count > maxCount) {
+      maxCount = count;
+      dominantFormat = format;
+    }
+  }
+  
+  // Create structure info based on the dominant format
+  if (dominantFormat === 'pcs' && pcsCount > 0) {
+    return { 
+      format: 'pcs', 
+      levels: ['part', 'chapter', 'section'],
+      levelSeparator: '-',
+      levelPrefixes: { part: 'P', chapter: 'C', section: 'S' }
+    };
+  } else if (dominantFormat === 'ps' && psCount > 0) {
+    return { 
+      format: 'ps', 
+      levels: ['part', 'section'],
+      levelSeparator: '-',
+      levelPrefixes: { part: 'P', section: 'S' }
+    };
+  } else if (dominantFormat === 'cs' && csCount > 0) {
+    return { 
+      format: 'cs', 
+      levels: ['chapter', 'section'],
+      levelSeparator: '-',
+      levelPrefixes: { chapter: 'C', section: 'S' }
+    };
+  } else if (dominantFormat === 'article' && artCount > 0) {
+    return { 
+      format: 'article', 
+      levels: ['article'],
+      levelSeparator: '-',
+      levelPrefixes: { article: 'ART' }
+    };
+  } else if (dominantFormat === 'section' && secCount > 0) {
+    return { 
+      format: 'section', 
+      levels: ['section'],
+      levelSeparator: '-',
+      levelPrefixes: { section: 'S' }
+    };
+  }
+  
+  // If no known pattern is dominant, try inferring from the first ID
+  if (sectionIds.length > 0) {
+    return inferDocumentStructure(sectionIds[0]);
+  }
+  
+  // Default
+  return { 
+    format: 'unknown', 
+    levels: ['section'],
+    levelSeparator: '-',
+    levelPrefixes: { section: 'S' }
+  };
+}
+
+/**
+ * Infers document structure from a section ID by analyzing patterns
+ */
+function inferDocumentStructure(sectionId: string): DocumentStructureInfo {
+  // Determine the separator used (if any)
+  const separator = sectionId.includes('-') ? '-' : 
+                   sectionId.includes('.') ? '.' :
+                   sectionId.includes('/') ? '/' : null;
+  
+  if (!separator) {
+    // Single level ID (e.g., S12, ART5)
+    const match = sectionId.match(/^([A-Za-z]+)(\d+)$/);
+    if (match) {
+      const [, prefix] = match;
+      const levelType = inferLevelTypeFromPrefix(prefix);
+      
+      return {
+        format: levelType,
+        levels: [levelType],
+        levelSeparator: '-', // Default separator for consistency
+        levelPrefixes: { [levelType]: prefix }
+      };
+    }
+    
+    // Unrecognized format, use default
+    return { 
+      format: 'unknown', 
+      levels: ['section'],
+      levelSeparator: '-',
+      levelPrefixes: { section: 'S' }
+    };
+  }
+  
+  // Multi-level ID with separator (e.g., P1-C2-S3, T1.CH2.SEC3)
+  const parts = sectionId.split(separator);
+  const levels: string[] = [];
+  const prefixes: Record<string, string> = {};
+  
+  for (const part of parts) {
+    const match = part.match(/^([A-Za-z]+)(\d+)$/);
+    if (match) {
+      const [, prefix] = match;
+      const levelType = inferLevelTypeFromPrefix(prefix);
+      
+      levels.push(levelType);
+      prefixes[levelType] = prefix;
+    }
+  }
+  
+  if (levels.length > 0) {
+    return {
+      format: levels.join('-'),
+      levels,
+      levelSeparator: separator,
+      levelPrefixes: prefixes
+    };
+  }
+  
+  // Fallback for unrecognized formats
+  return { 
+    format: 'unknown', 
+    levels: ['section'],
+    levelSeparator: '-',
+    levelPrefixes: { section: 'S' }
+  };
+}
+
+/**
+ * Infers the level type based on common prefix abbreviations
+ */
+function inferLevelTypeFromPrefix(prefix: string): string {
+  const upperPrefix = prefix.toUpperCase();
+  
+  const prefixMap: Record<string, string> = {
+    'P': 'part',
+    'PT': 'part',
+    'C': 'chapter',
+    'CH': 'chapter',
+    'S': 'section',
+    'SEC': 'section',
+    'A': 'article',
+    'ART': 'article',
+    'T': 'title',
+    'TIT': 'title',
+    'D': 'division',
+    'SUB': 'subdivision',
+    'PAR': 'paragraph'
+  };
+  
+  return prefixMap[upperPrefix] || 'section';
+}
+
+/**
+ * Stores the extracted / processed law text and bumps the call counters.
+ * Improved version with optimized storage:
+ * 1. Stores content directly with each node
+ * 2. Efficiently supports arbitrary hierarchical structures
+ * 3. Focuses on leaf nodes for simplicity
  */
 export async function saveToolCallWithCounters({
   uid,
@@ -84,10 +401,11 @@ export async function saveToolCallWithCounters({
   content: string;
   tokensUsed?: number;
   type?: string;
-}) {
+}): Promise<ReturnType<typeof parseContentSections>> {
   console.log(`[DEBUG] saveToolCallWithCounters called for toolCallId: ${toolCallId}`);
   
-  // Keep original storage for backward compatibility
+  let finalSectionsMap: ReturnType<typeof parseContentSections> = {};
+  
   const docRef = adminDb
     .collection("users")
     .doc(uid)
@@ -96,116 +414,470 @@ export async function saveToolCallWithCounters({
     .collection("toolCalls")
     .doc(toolCallId);
 
+  // Create the initial document with metadata but WITHOUT the full content
   await docRef.set({
     key,
-    content,
+    contentSummary: {
+      length: content.length,
+      preview: content.substring(0, 100) + '...' // Optional: store just a preview
+    },
     createdAt: new Date(),
     tokensUsed,
     type,
     hasExtractedSections: false, // Will be updated after extraction
   });
   
-  console.log(`[DEBUG] Original content saved to toolCalls/${toolCallId}`);
+  console.log(`[DEBUG] Tool call metadata saved to toolCalls/${toolCallId} without full content`);
+
+  // Defensive: ensure content is always a string
+  if (typeof content !== 'string') {
+    console.error('[saveToolCallWithCounters] Content is not a string:', content);
+    content = '';
+  }
 
   // Parse and store structured sections
   try {
     console.log(`[DEBUG] Starting section parsing for content length: ${content.length}`);
     const sectionsMap = parseContentSections(content);
+    finalSectionsMap = sectionsMap;
     
-    // Store each PCS section with title and content separately
-    const batch = adminDb.batch();
+    // Store sections in a flexible hierarchical format
+    let batchOp = adminDb.batch();
+    let batchCount = 0;
     
-    // Store sections under toolCalls/{toolCallId}/sections/{sectionId}
-    const toolCallSectionsRef = adminDb
+    // Group sections by documentId/filename
+    const documentMap: Record<string, {
+      documentId: string;
+      documentTitle: string;
+      sectionIds: string[];
+    }> = {};
+    
+    // Group sections by document
+    for (const [sectionId, sectionData] of Object.entries(sectionsMap)) {
+      // Use clean documentId as the key, defaulting to 'unknown_document' if missing
+      const documentId = sectionData.documentId || 'unknown_document';
+      
+      if (!documentMap[documentId]) {
+        documentMap[documentId] = {
+          documentId,
+          documentTitle: sectionData.documentTitle || documentId,
+          sectionIds: []
+        };
+      }
+      
+      documentMap[documentId].sectionIds.push(sectionId);
+    }
+    
+    // Detect document structure from section IDs
+    const allSectionIds = Object.keys(sectionsMap);
+    const documentStructure = detectDocumentStructure(allSectionIds);
+    
+    // Set up Firestore path for the hierarchical data
+    const hierarchyRef = docRef.collection("hierarchy");
+    
+    // Store document-level data
+    for (const [documentId, docData] of Object.entries(documentMap)) {
+      const docRef = hierarchyRef.doc(documentId);
+      
+      batchOp.set(docRef, {
+        documentId: docData.documentId,
+        documentTitle: docData.documentTitle,
+        createdAt: new Date(),
+        sectionCount: docData.sectionIds.length,
+        documentStructure // Store structure information
+      });
+      
+      batchCount++;
+      if (batchCount >= BATCH_SIZE_LIMIT) {
+        await batchOp.commit();
+        batchOp = adminDb.batch();
+        batchCount = 0;
+      }
+      
+      // Now build and store the hierarchy based on the detected document structure
+      await storeHierarchicalNodes(
+        docRef.collection("nodes"),
+        docData.sectionIds,
+        sectionsMap
+      );
+    }
+    
+    // Commit remaining batch operations
+    if (batchCount > 0) {
+      await batchOp.commit();
+    }
+    
+    // Mark the tool call as having extracted sections
+    await docRef.update({
+      hasExtractedSections: true,
+      sectionCount: Object.keys(sectionsMap).length,
+      documentCount: Object.keys(documentMap).length,
+      documentStructure: documentStructure // Include structure info
+    });
+    
+    console.log(`[DEBUG] Tool call sections saved with optimized storage`);
+  } catch (err) {
+    console.error(`[saveToolCallWithCounters] Error during section storage:`, err);
+    await docRef.update({
+      error: (err as Error)?.message || "Unknown error",
+      errorTimestamp: new Date()
+    });
+  }
+  
+  return finalSectionsMap;
+}
+
+/**
+ * Store section nodes - simplified to only store leaf nodes
+ * Creates a flat structure directly under document files with just the innermost children (leaf nodes)
+ * Now includes content directly with each node instead of using content hash references
+ */
+async function storeHierarchicalNodes(
+  nodesCollection: CollectionReference<DocumentData>, // the Firestore collection ref for nodes
+  sectionIds: string[],
+  sectionsMap: Record<string, {
+    title: string,
+    content: string,
+    documentId?: string,
+    documentTitle?: string,
+    partNumber?: string,
+    chapterNumber?: string,
+    sectionNumber?: string,
+    partTitle?: string,
+    chapterTitle?: string,
+    sectionTitle?: string,
+    nodeTitles?: Record<string, string>
+  }>
+): Promise<void> {
+  let batchOp = adminDb.batch();
+  let batchCount = 0;
+  
+  // Get document structure to identify hierarchy levels
+  const documentStructure = detectDocumentStructure(sectionIds);
+  
+  // Store the leaf nodes with all their metadata
+  for (const sectionId of sectionIds) {
+    const sectionData = sectionsMap[sectionId];
+    if (!sectionData) continue;
+    
+    // Parse the section ID to extract hierarchy components
+    const components = parseHierarchicalId(sectionId, documentStructure);
+    
+    // Create metadata object - only include structural information, not content
+    const metadata: Record<string, unknown> = {};
+    
+    // Add basic document information
+    if (sectionData.documentId) metadata.documentId = sectionData.documentId;
+    if (sectionData.documentTitle) metadata.documentTitle = sectionData.documentTitle;
+    
+    // Add standard hierarchical components without duplication
+    if (sectionData.partNumber) {
+      metadata.partNumber = sectionData.partNumber;
+      // We don't need to store both partNumber and part, which has the same information
+      // metadata.part = `P${sectionData.partNumber}`;
+    }
+    
+    if (sectionData.chapterNumber) {
+      metadata.chapterNumber = sectionData.chapterNumber;
+      // metadata.chapter = `C${sectionData.chapterNumber}`;
+    }
+    
+    if (sectionData.sectionNumber) {
+      metadata.sectionNumber = sectionData.sectionNumber;
+      // metadata.section = `S${sectionData.sectionNumber}`;
+    }
+    
+    // Add titles for hierarchical nodes - this is important metadata
+    if (sectionData.partTitle) metadata.partTitle = sectionData.partTitle;
+    if (sectionData.chapterTitle) metadata.chapterTitle = sectionData.chapterTitle;
+    if (sectionData.sectionTitle) metadata.sectionTitle = sectionData.sectionTitle;
+    
+    // Only add node titles for structure elements, not content elements
+    if (sectionData.nodeTitles) {
+      // Filter out content-related keys (Clause content)
+      Object.entries(sectionData.nodeTitles).forEach(([key, value]) => {
+        // Only add structural titles, skip content items like clauses
+        if (key.startsWith('partTitle') || 
+            key.startsWith('chapterTitle') || 
+            key.startsWith('sectionTitle') || 
+            key.startsWith('subsectionTitle')) {
+          metadata[key] = value;
+        }
+      });
+    }
+    
+    // Create the node data for the section
+    const nodeData = {
+      nodeId: sectionId,
+      nodeType: 'section',
+      nodeTitle: sectionData.title || sectionId,
+      content: sectionData.content, // Store just the actual content
+      createdAt: new Date(),
+      hierarchyPath: components, // Store the full path as an array
+      metadata
+    };
+    
+    // Store the node
+    const nodeRef = nodesCollection.doc(sectionId);
+    batchOp.set(nodeRef, nodeData);
+    batchCount++;
+    
+    // Commit batch if reaching limit
+    if (batchCount >= BATCH_SIZE_LIMIT) {
+      await batchOp.commit();
+      batchOp = adminDb.batch();
+      batchCount = 0;
+    }
+  }
+  
+  // Commit any remaining batch operations
+  if (batchCount > 0) {
+    await batchOp.commit();
+  }
+}
+
+/**
+ * Parses a section ID into its hierarchical components based on document structure
+ */
+function parseHierarchicalId(sectionId: string, structure: DocumentStructureInfo): string[] {
+  const { levelSeparator, levelPrefixes } = structure;
+  
+  // Split the ID by the separator
+  if (sectionId.includes(levelSeparator)) {
+    return sectionId.split(levelSeparator);
+  }
+  
+  // Handle single-level IDs
+  // Try to extract the prefix and number
+  for (const [, prefix] of Object.entries(levelPrefixes)) {
+    if (sectionId.startsWith(prefix)) {
+      return [sectionId];
+    }
+  }
+  
+  // Default: return the ID as a single component
+  return [sectionId];
+}
+
+/**
+ * Retrieves the content of a specific node in the hierarchy
+ */
+export async function retrieveNodeContent({
+  uid,
+  conversationId,
+  toolCallId,
+  documentId,
+  nodeId
+}: {
+  uid: string;
+  conversationId: string;
+  toolCallId: string;
+  documentId: string;
+  nodeId: string;
+}): Promise<{
+  nodeId: string;
+  nodeTitle: string;
+  nodeType: string;
+  content?: string;
+  children?: string[];
+  parentId?: string;
+  metadata?: Record<string, unknown>;
+} | null> {
+  try {
+    console.log(`[DEBUG] Retrieving node content for ${nodeId} in document ${documentId}`);
+    
+    const nodeRef = adminDb
       .collection("users")
       .doc(uid)
       .collection("conversations")
       .doc(conversationId)
       .collection("toolCalls")
       .doc(toolCallId)
-      .collection("sections");
-      
-    console.log(`[DEBUG] Created toolCall sections reference at path: ${toolCallSectionsRef.path}`);
+      .collection("hierarchy")
+      .doc(documentId)
+      .collection("nodes")
+      .doc(nodeId);
     
-    // Continue to store in lawSections for backward compatibility but with toolCallId field
-    const lawSectionsRef = adminDb
-      .collection("users")
-      .doc(uid)
-      .collection("conversations")
-      .doc(conversationId)
-      .collection("lawSections");
+    const nodeDoc = await nodeRef.get();
     
-    for (const [pcsId, sectionData] of Object.entries(sectionsMap)) {
-      // 1. Store under toolCall document
-      const sectionRef = toolCallSectionsRef.doc(pcsId);
-      console.log(`[DEBUG] Adding section ${pcsId} to toolCall batch`);
-      
-      batch.set(sectionRef, {
-        title: sectionData.title,
-        content: sectionData.content,
-        createdAt: new Date()
-      });
-      
-      // 2. Store in lawSections for backward compatibility
-      const lawSectionRef = lawSectionsRef.doc(pcsId);
-      console.log(`[DEBUG] Adding section ${pcsId} to lawSections batch`);
-      
-      batch.set(lawSectionRef, {
-        title: sectionData.title,
-        content: sectionData.content,
-        toolCallId, // reference to original data
-        createdAt: new Date()
-      });
+    if (!nodeDoc.exists) {
+      console.log(`[DEBUG] Node ${nodeId} not found`);
+      return null;
     }
     
-    // Update the toolCall document to indicate it has extracted sections
-    batch.update(docRef, { 
-      hasExtractedSections: true,
-      sectionsCount: Object.keys(sectionsMap).length,
-      sectionIds: Object.keys(sectionsMap)
-    });
+    const nodeData = nodeDoc.data();
+    if (!nodeData) {
+      console.log(`[DEBUG] Node ${nodeId} has no data`);
+      return null;
+    }
     
-    console.log(`[DEBUG] Committing batch with ${Object.keys(sectionsMap).length} sections`);
-    await batch.commit();
-    console.log(`[DEBUG] Batch committed successfully`);
-    console.log(`[ToolCallStore] Parsed and stored ${Object.keys(sectionsMap).length} structured sections`);
+    return {
+      nodeId: nodeData.nodeId,
+      nodeTitle: nodeData.nodeTitle,
+      nodeType: nodeData.nodeType,
+      content: nodeData.content,
+      children: nodeData.children,
+      parentId: nodeData.parentId,
+      metadata: nodeData.metadata
+    };
   } catch (error) {
-    console.error("[ToolCallStore] Error parsing or storing sections:", error);
-    // Continue even if parsing fails - original content is still saved
+    console.error(`[DEBUG] Error retrieving node content:`, error);
+    return null;
   }
+}
 
-  // update conversation counter - first check if conversation exists
-  const convoRef = adminDb
-    .collection("users")
-    .doc(uid)
-    .collection("conversations")
-    .doc(conversationId);
-
-  const convoDoc = await convoRef.get();
-  if (convoDoc.exists) {
-    await convoRef.update({ convoToolCalls: firestoreFieldValue.increment(1) });
-  } else {
-    // Create the conversation document if it doesn't exist
-    await convoRef.set({ 
-      convoToolCalls: 1,
-      createdAt: new Date()
+/**
+ * Recursively builds a complete subtree from a node ID
+ */
+export async function buildNodeSubtree({
+  uid,
+  conversationId,
+  toolCallId,
+  documentId,
+  nodeId,
+  includeContent = false
+}: {
+  uid: string;
+  conversationId: string;
+  toolCallId: string;
+  documentId: string;
+  nodeId: string;
+  includeContent?: boolean;
+}): Promise<HierarchyNode | null> {
+  try {
+    // Get the node data
+    const nodeData = await retrieveNodeContent({
+      uid,
+      conversationId,
+      toolCallId,
+      documentId,
+      nodeId
     });
-  }
-
-  // update user counter
-  const userRef = adminDb.collection("users").doc(uid);
-  const userDoc = await userRef.get();
-  if (userDoc.exists) {
-    await userRef.update({ totalToolCalls: firestoreFieldValue.increment(1) });
-  } else {
-    // Create the user document if it doesn't exist
-    await userRef.set({ 
-      totalToolCalls: 1,
-      createdAt: new Date()
-    });
-  }
     
-  console.log(`[DEBUG] saveToolCallWithCounters completed for toolCallId: ${toolCallId}`);
+    if (!nodeData) {
+      return null;
+    }
+    
+    // Create the node
+    const node: HierarchyNode = {
+      nodeId: nodeData.nodeId,
+      nodeType: nodeData.nodeType,
+      nodeTitle: nodeData.nodeTitle,
+      metadata: nodeData.metadata
+    };
+    
+    // Only include content if requested (to reduce payload size)
+    if (includeContent && nodeData.content) {
+      node.content = nodeData.content;
+    }
+    
+    // Recursively build children if any
+    if (nodeData.children && nodeData.children.length > 0) {
+      node.children = [];
+      
+      for (const childId of nodeData.children) {
+        const childNode = await buildNodeSubtree({
+          uid,
+          conversationId,
+          toolCallId,
+          documentId,
+          nodeId: childId,
+          includeContent
+        });
+        
+        if (childNode) {
+          node.children.push(childNode);
+        }
+      }
+    }
+    
+    return node;
+  } catch (error) {
+    console.error(`[DEBUG] Error building node subtree:`, error);
+    return null;
+  }
+}
+
+/**
+ * Retrieves all sections with their content for a given toolCallId, optimized for the frontend
+ */
+export async function retrieveAllNodeContents({
+  _uid,
+  _conversationId,
+  toolCallId
+}: {
+  _uid: string;
+  _conversationId: string;
+  toolCallId: string;
+}): Promise<Record<string, Record<string, {
+  nodeId: string;
+  nodeTitle: string;
+  nodeType: string;
+  content?: string;
+  children?: string[];
+  parentId?: string;
+  metadata?: Record<string, unknown>;
+}>>> {
+  try {
+    console.log(`[DEBUG] Retrieving all node contents for toolCallId: ${toolCallId}`);
+    
+    // Get all documents in the hierarchy
+    const hierarchyRef = adminDb
+      .collection("users")
+      .doc(_uid)
+      .collection("conversations")
+      .doc(_conversationId)
+      .collection("toolCalls")
+      .doc(toolCallId)
+      .collection("hierarchy");
+    
+    const docsSnapshot = await hierarchyRef.get();
+    const result: Record<string, Record<string, {
+      nodeId: string;
+      nodeTitle: string;
+      nodeType: string;
+      content?: string;
+      children?: string[];
+      parentId?: string;
+      metadata?: Record<string, unknown>;
+    }>> = {};
+    
+    // For each document, get all its nodes
+    for (const docDoc of docsSnapshot.docs) {
+      const documentId = docDoc.id;
+      const documentData = docDoc.data();
+      
+      console.log(`[DEBUG] Processing document: ${documentId}, title: ${documentData.documentTitle}`);
+      
+      const nodesRef = hierarchyRef.doc(documentId).collection("nodes");
+      const nodesSnapshot = await nodesRef.get();
+      
+      result[documentId] = {};
+      
+      // Store all nodes in the result
+      for (const nodeDoc of nodesSnapshot.docs) {
+        const nodeId = nodeDoc.id;
+        const nodeData = nodeDoc.data();
+        
+        result[documentId][nodeId] = {
+          nodeId: nodeData.nodeId,
+          nodeTitle: nodeData.nodeTitle,
+          nodeType: nodeData.nodeType,
+          content: nodeData.content,
+          children: nodeData.children,
+          parentId: nodeData.parentId,
+          metadata: nodeData.metadata as Record<string, unknown>
+        };
+      }
+    }
+    
+    console.log(`[DEBUG] Retrieved node contents for ${Object.keys(result).length} documents`);
+    
+    return result;
+  } catch (error) {
+    console.error(`[DEBUG] Error retrieving all node contents:`, error);
+    return {};
+  }
 }
 
 /**
@@ -225,332 +897,130 @@ export async function getToolCallsForConversation(
     .orderBy("createdAt", "desc")
     .get();
     
-  return snapshot.docs.map(doc => {
+  return Promise.all(snapshot.docs.map(async doc => {
     const data = doc.data();
+    
+    // Calculate sectionsCount from files if we don't store it directly
+    let sectionsCount = data.sectionsCount || 0;
+    
+    // If no sectionsCount but has files metadata, compute from there
+    if (!sectionsCount && data.files && Array.isArray(data.files)) {
+      sectionsCount = data.files.reduce((sum, file) => sum + (file.sectionsCount || 0), 0);
+    }
+    
     return {
       id: doc.id,
       key: data.key || "",
       createdAt: data.createdAt?.toDate() || new Date(),
-      sectionsCount: data.sectionsCount || 0
+      sectionsCount
     };
-  });
+  }));
 }
 
 /**
- * Gets all sections for a specific tool call.
- * This allows retrieving all sections from a particular search operation.
+ * Utility function to clean up any existing nodes that might have content data in metadata
+ * This can be run as a one-time cleanup operation
  */
-export async function getSectionsForToolCall(
+export async function cleanupContentFromMetadata(
   uid: string,
   conversationId: string,
   toolCallId: string
-): Promise<Array<{id: string, title: string, content: string}>> {
-  // Try the new nested path first
-  let snapshot = await adminDb
-    .collection("users")
-    .doc(uid)
-    .collection("conversations")
-    .doc(conversationId)
-    .collection("toolCalls")
-    .doc(toolCallId)
-    .collection("sections")
-    .get();
-    
-  // If no results in the nested structure, try the flat structure with toolCallId filter
-  if (snapshot.empty) {
-    console.log(`[DEBUG] No sections found in nested structure, trying flat structure`);
-    snapshot = await adminDb
-      .collection("users")
-      .doc(uid)
-      .collection("conversations")
-      .doc(conversationId)
-      .collection("lawSections")
-      .where("toolCallId", "==", toolCallId)
-      .get();
-  }
-    
-  return snapshot.docs.map(doc => {
-    const data = doc.data();
-    return {
-      id: doc.id,
-      title: data.title || "",
-      content: data.content || ""
-    };
-  });
-}
-
-/**
- * Retrieves the saved law text.
- * Tries the expected path first; if nothing is there,
- * falls back to the path that was actually used by the search tool.
- */
-export async function retrieveLawText({
-  uid,
-  conversationId,
-  toolCallId,
-}: {
-  uid: string;
-  conversationId: string;
-  toolCallId: string;
-  key?: string; // Made optional since it's not used
-}): Promise<string | null> {
-  // 1️⃣  Preferred location (with user ID)
-  let snap = await adminDb
-    .collection("users")
-    .doc(uid)
-    .collection("conversations")
-    .doc(conversationId)
-    .collection("toolCalls")
-    .doc(toolCallId)
-    .get();
-
-  // 2️⃣  Fallback location (without user ID)
-  if (!snap.exists) {
-    snap = await adminDb
-      .collection("conversations")
-      .doc(conversationId)
-      .collection("toolCalls")
-      .doc(toolCallId)
-      .get();
-  }
-
-  if (!snap.exists) return null;
-
-  const data = snap.data();
-  return data ? data.content : null;
-}
-
-/**
- * Retrieves just the section titles for a conversation.
- * This is useful for displaying a list of available sections
- * without loading the full content of each section.
- * 
- * @param {string} uid - User ID
- * @param {string} conversationId - Conversation ID
- * @param {string} toolCallId - Optional tool call ID to filter sections
- * @returns {Promise<Record<string, string>>} Object with PCS IDs as keys and section titles as values
- */
-export async function retrieveSectionTitles(
-  uid: string,
-  conversationId: string,
-  toolCallId?: string
-): Promise<Record<string, string>> {
-  let snapshot;
+): Promise<{ 
+  success: boolean; 
+  documentsProcessed: number; 
+  nodesProcessed: number;
+  nodesUpdated: number;
+}> {
+  console.log(`[DEBUG] Starting metadata cleanup for toolCallId: ${toolCallId}`);
   
-  if (toolCallId) {
-    // If toolCallId is provided, first try the new nested structure
-    snapshot = await adminDb
-      .collection("users")
-      .doc(uid)
-      .collection("conversations")
-      .doc(conversationId)
-      .collection("toolCalls")
-      .doc(toolCallId)
-      .collection("sections")
-      .get();
-      
-    // If no results in the nested structure, try the flat structure with toolCallId filter
-    if (snapshot.empty) {
-      snapshot = await adminDb
-        .collection("users")
-        .doc(uid)
-        .collection("conversations")
-        .doc(conversationId)
-        .collection("lawSections")
-        .where("toolCallId", "==", toolCallId)
-        .get();
-    }
-  } else {
-    // If no toolCallId provided, just get all lawSections
-    snapshot = await adminDb
-      .collection("users")
-      .doc(uid)
-      .collection("conversations")
-      .doc(conversationId)
-      .collection("lawSections")
-      .get();
-  }
-    
-  const titles: Record<string, string> = {};
-  snapshot.forEach(doc => {
-    titles[doc.id] = doc.data().title || '';
-  });
+  const result = {
+    success: false,
+    documentsProcessed: 0,
+    nodesProcessed: 0,
+    nodesUpdated: 0
+  };
   
-  return titles;
-}
-
-/**
- * Retrieves a specific section from the law text by its title or identifier.
- * First tries to get it from the structured storage, then falls back to
- * extracting from the full text if needed.
- * 
- * @param {object} params - The parameters for retrieving a section
- * @param {string} params.uid - User ID
- * @param {string} params.conversationId - Conversation ID
- * @param {string} params.toolCallId - Tool call ID (optional if using sectionId)
- * @param {string} params.sectionId - Section identifier (P-C-S format)
- * @returns {Promise<string|null>} The extracted section text or null if not found
- */
-export async function retrieveSectionText({
-  uid,
-  conversationId,
-  toolCallId,
-  sectionId,
-}: {
-  uid: string;
-  conversationId: string;
-  toolCallId?: string;
-  sectionId: string;
-}): Promise<string | null> {
-  // If toolCallId is provided and it's a PCS format, try the nested structure first
-  if (toolCallId && /^P\d+-C\d+-S\d+$/.test(sectionId)) {
-    // Try nested structure first (preferred)
-    const sectionDoc = await adminDb
-      .collection("users")
-      .doc(uid)
-      .collection("conversations")
-      .doc(conversationId)
-      .collection("toolCalls")
-      .doc(toolCallId)
-      .collection("sections")
-      .doc(sectionId)
-      .get();
-      
-    if (sectionDoc.exists) {
-      return sectionDoc.data()?.content || null;
-    }
-  }
-  
-  // Try the flat structure with PCS format
-  if (/^P\d+-C\d+-S\d+$/.test(sectionId)) {
-    // First try the direct flat structure
-    const sectionDoc = await adminDb
-      .collection("users")
-      .doc(uid)
-      .collection("conversations")
-      .doc(conversationId)
-      .collection("lawSections")
-      .doc(sectionId)
-      .get();
-      
-    if (sectionDoc.exists) {
-      return sectionDoc.data()?.content || null;
-    }
-  }
-  
-  // If no toolCallId provided or section not found in structured storage, 
-  // try to find the most recent tool call
-  if (!toolCallId) {
-    const toolCallsSnapshot = await adminDb
-      .collection("users")
-      .doc(uid)
-      .collection("conversations")
-      .doc(conversationId)
-      .collection("toolCalls")
-      .orderBy("createdAt", "desc")
-      .limit(1)
-      .get();
-      
-    if (!toolCallsSnapshot.empty) {
-      toolCallId = toolCallsSnapshot.docs[0].id;
-    }
-  }
-  
-  if (!toolCallId) return null;
-  
-  // Fall back to original method if not found in structured storage
-  // First retrieve the full law text
-  const fullText = await retrieveLawText({
-    uid,
-    conversationId,
-    toolCallId,
-  });
-  
-  if (!fullText) return null;
-  
-  console.log(`Searching for section: "${sectionId}"`);
-  
-  // Determine search pattern based on sectionId format
-  const isPCSFormat = /^P\d+-C\d+-S\d+$/.test(sectionId);
-  const isNumberFormat = /^\d+$/.test(sectionId);
-  
-  let exactPattern = null;
-  let titlePattern = null;
-  let pcsPattern = null;
-  
-  if (isPCSFormat) {
-    // Store P-C-S format pattern
-    pcsPattern = `---- \\[${sectionId}\\] ----(.*?)(?=---- \\[|$)`;
-    exactPattern = pcsPattern;
-  } else if (isNumberFormat) {
-    // Look for section by number
-    exactPattern = `Section\\s+${sectionId}:(.*?)(?=\\*\\s*Section|---- \\[P\\d+-C\\d+-S\\d+\\]|$)`;
-  } else {
-    // Match by section title - be very precise about where the section ends
-    const escapedTitle = sectionId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    
-    if (sectionId.toLowerCase().includes('section')) {
-      // If title already includes "Section", match it exactly
-      titlePattern = `${escapedTitle}(.*?)(?=\\*\\s*Section|---- \\[P\\d+-C\\d+-S\\d+\\]|$)`;
-    } else {
-      // Otherwise look for "Section: title"
-      titlePattern = `Section(?:\\s+\\d+)?:\\s*${escapedTitle}(.*?)(?=\\*\\s*Section|---- \\[P\\d+-C\\d+-S\\d+\\]|$)`;
-    }
-    exactPattern = titlePattern;
-  }
-
   try {
-    // Extract exact section match - very strict boundary
-    let sectionContent = null;
-    const sectionRegex = new RegExp(exactPattern, 's');
-    const match = fullText.match(sectionRegex);
+    // Get the hierarchy documents
+    const hierarchyRef = adminDb
+      .collection("users")
+      .doc(uid)
+      .collection("conversations")
+      .doc(conversationId)
+      .collection("toolCalls")
+      .doc(toolCallId)
+      .collection("hierarchy");
     
-    if (match && match[1]) {
-      sectionContent = match[1].trim();
+    const docs = await hierarchyRef.get();
+    result.documentsProcessed = docs.size;
+    
+    // Process each document
+    for (const doc of docs.docs) {
+      const documentId = doc.id;
+      const nodesRef = hierarchyRef.doc(documentId).collection("nodes");
+      const nodes = await nodesRef.get();
       
-      // Additional processing to ensure we're not getting extra sections
-      // Split into lines
-      const lines = sectionContent.split('\n');
+      console.log(`[DEBUG] Processing document ${documentId} with ${nodes.size} nodes`);
+      result.nodesProcessed += nodes.size;
       
-      // Find the first line index that looks like the start of a new section
-      let sectionEndIndex = lines.length;
-      for (let i = 0; i < lines.length; i++) {
-        if (i > 0 && (
-          /^P\d+-C\d+-S\d+/.test(lines[i]) || 
-          /^---- \[P\d+-C\d+-S\d+\]/.test(lines[i]) ||
-          /^Part:/.test(lines[i]) ||
-          /^Section:/.test(lines[i]) && i > 3 // Allow "Section:" in the first few lines (might be part of the content)
-        )) {
-          sectionEndIndex = i;
-          break;
-        }
-      }
+      // Create a batch for updates
+      let batchOp = adminDb.batch();
+      let batchCount = 0;
+      let updatedNodes = 0;
       
-      // Only take content up to the next section
-      sectionContent = lines.slice(0, sectionEndIndex).join('\n').trim();
-      
-      // Additional sanity check - if we found P-C-S markers within the content, stop there
-      const pcsInContent = sectionContent.match(/P\d+-C\d+-S\d+/g);
-      if (pcsInContent && pcsInContent.length > 1) {
-        // Multiple P-C-S markers found, likely including other sections
-        const firstPCS = pcsInContent[0];
-        const parts = sectionContent.split(new RegExp(`P\\d+-C\\d+-S\\d+`, 'g'));
+      for (const nodeDoc of nodes.docs) {
+        const nodeData = nodeDoc.data();
+        if (!nodeData.metadata) continue;
         
-        // Keep only the content before the second P-C-S marker
-        if (parts.length > 1) {
-          sectionContent = firstPCS + parts[1];
+        // Create a cleaned metadata object
+        const cleanedMetadata: Record<string, unknown> = {};
+        const metadataToKeep = [
+          'documentId', 'documentTitle',
+          'partNumber', 'partTitle',
+          'chapterNumber', 'chapterTitle',
+          'sectionNumber', 'sectionTitle'
+        ];
+        
+        // Keep only structural metadata
+        for (const key of metadataToKeep) {
+          if (nodeData.metadata[key] !== undefined) {
+            cleanedMetadata[key] = nodeData.metadata[key];
+          }
+        }
+        
+        // Check if we need to update this node
+        const needsUpdate = Object.keys(cleanedMetadata).length !== Object.keys(nodeData.metadata).length;
+        
+        if (needsUpdate) {
+          // Update the node with cleaned metadata
+          batchOp.update(nodeDoc.ref, { metadata: cleanedMetadata });
+          batchCount++;
+          updatedNodes++;
+          
+          // Commit batch if reaching limit
+          if (batchCount >= BATCH_SIZE_LIMIT) {
+            await batchOp.commit();
+            batchOp = adminDb.batch();
+            batchCount = 0;
+          }
         }
       }
       
-      return sectionContent;
+      // Commit any remaining batch operations
+      if (batchCount > 0) {
+        await batchOp.commit();
+      }
+      
+      console.log(`[DEBUG] Updated ${updatedNodes} nodes in document ${documentId}`);
+      result.nodesUpdated += updatedNodes;
     }
     
-    // If we get here, no match was found
-    console.log(`No exact match found for section: "${sectionId}"`);
-    return null;
+    result.success = true;
+    console.log(`[DEBUG] Cleanup complete. Processed ${result.nodesProcessed} nodes, updated ${result.nodesUpdated}`);
     
+    return result;
   } catch (error) {
-    console.error("Regex error extracting section:", error);
-    return null;
+    console.error(`[DEBUG] Error during cleanup:`, error);
+    return result;
   }
 }

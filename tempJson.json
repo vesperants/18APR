@@ -1,0 +1,208 @@
+{
+    "messageId": "msg_1234567890",
+    "conversationId": "conv_9876543210",
+    "timestamp": "2025-04-21T14:32:18Z",
+    "message": "I've found several laws related to corruption across different legal documents. Here are the relevant sections:",
+    "toolCallId": "search_123456",
+    "blocks": [
+      {
+        "type": "text",
+        "content": "Based on your search for corruption laws, I've identified relevant sections in the following documents:"
+      },
+      {
+        "type": "document",
+        "documentId": "criminal_code",
+        "title": "Criminal Code",
+        "parts": [
+          {
+            "partId": "P3",
+            "title": "Offenses Against Public Administration",
+            "chapters": [
+              {
+                "chapterId": "C4",
+                "title": "Corruption and Official Misconduct",
+                "sections": [
+                  {
+                    "blockId": "block_12345",
+                    "pcsId": "P3-C4-S12",
+                    "title": "Corruption in Public Office",
+                    "preview": "Covers acts of corruption committed by elected officials..."
+                  },
+                  {
+                    "blockId": "block_12346",
+                    "pcsId": "P3-C4-S13",
+                    "title": "Bribery",
+                    "preview": "Defines and prohibits offering or accepting bribes..."
+                  }
+                ]
+              },
+              {
+                "chapterId": "C5",
+                "title": "Abuse of Authority",
+                "sections": [
+                  {
+                    "blockId": "block_12347",
+                    "pcsId": "P3-C5-S2",
+                    "title": "Misuse of Official Information",
+                    "preview": "Prohibits using confidential information for personal gain..."
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "partId": "P4",
+            "title": "Financial Crimes",
+            "chapters": [
+              {
+                "chapterId": "C2",
+                "title": "Money Laundering",
+                "sections": [
+                  {
+                    "blockId": "block_12348",
+                    "pcsId": "P4-C2-S7",
+                    "title": "Corruption-Related Money Laundering",
+                    "preview": "Covers concealment of proceeds from corruption..."
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "document",
+        "documentId": "public_ethics_act",
+        "title": "Public Ethics Act",
+        "parts": [
+          {
+            "partId": "P1",
+            "title": "Standards of Conduct",
+            "chapters": [
+              {
+                "chapterId": "C3",
+                "title": "Prevention of Corruption",
+                "sections": [
+                  {
+                    "blockId": "block_12349",
+                    "pcsId": "P1-C3-S4",
+                    "title": "Conflict of Interest",
+                    "preview": "Establishes guidelines for avoiding conflicts..."
+                  },
+                  {
+                    "blockId": "block_12350",
+                    "pcsId": "P1-C3-S5",
+                    "title": "Gift Restrictions",
+                    "preview": "Limits on gifts that may be accepted by officials..."
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "content": "Each section is clickable to view the full legal text. These provisions collectively address various aspects of corruption including bribery, misuse of office, conflicts of interest, and related financial crimes."
+      }
+    ]
+  }
+
+
+  {
+    "messageId": "msg_1234567890",
+    "conversationId": "conv_9876543210",
+    "toolCallId": "search_123456",
+    "message": "I've found several laws related to corruption across different legal documents.",
+    "files": [
+      {
+        "fileId": "criminal_code.txt",
+        "title": "Criminal Code",
+        "documents": [
+          {
+            "documentId": "criminal_code",
+            "parts": [
+              {
+                "partId": "P3",
+                "title": "Offenses Against Public Administration",
+                "chapters": [
+                  {
+                    "chapterId": "C4",
+                    "title": "Corruption and Official Misconduct",
+                    "sections": [
+                      {
+                        "blockId": "block_12345",
+                        "pcsId": "P3-C4-S12",
+                        "title": "Corruption in Public Office"
+                      },
+                      {
+                        "blockId": "block_12346",
+                        "pcsId": "P3-C4-S13",
+                        "title": "Bribery"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "fileId": "public_ethics_act.txt",
+        "title": "Public Ethics Act",
+        "documents": [
+          {
+            "documentId": "public_ethics_act",
+            "parts": [
+              {
+                "partId": "P1",
+                "title": "Standards of Conduct",
+                "chapters": [
+                  {
+                    "chapterId": "C3",
+                    "title": "Prevention of Corruption",
+                    "sections": [
+                      {
+                        "blockId": "block_12349",
+                        "pcsId": "P1-C3-S4",
+                        "title": "Conflict of Interest"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+
+
+
+  {
+    "toolCallId": "search_123456",
+    "fileContents": {
+      "criminal_code.txt": {
+        "sections": {
+          "P3-C4-S12": {
+            "content": "Section 12: Corruption in Public Office\n\n(1) A public official who, in connection with their official duties, solicits or accepts any benefit to which they are not entitled, commits an offense...",
+            "pcsId": "P3-C4-S12"
+          },
+          "P3-C4-S13": {
+            "content": "Section 13: Bribery\n\n(1) Any person who offers, gives, or agrees to give a public official any benefit with the intent to influence that official's actions, decisions, or judgments...",
+            "pcsId": "P3-C4-S13"
+          }
+        }
+      },
+      "public_ethics_act.txt": {
+        "sections": {
+          "P1-C3-S4": {
+            "content": "Section 4: Conflict of Interest\n\n(1) A public official shall not participate in any matter in which they have a personal financial interest that could substantially affect their official actions...",
+            "pcsId": "P1-C3-S4"
+          }
+        }
+      }
+    }
+  }

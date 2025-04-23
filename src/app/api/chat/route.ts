@@ -7,17 +7,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   GoogleGenerativeAI, SchemaType, Tool, Content,
-  GenerateContentResult, FunctionCall, FunctionResponsePart
+  FunctionCall, FunctionResponsePart
 } from '@google/generative-ai';
-import { runLegalSearchChain } from '@/lib/search-engine';
-import { retrieveLawText } from '@/lib/search-engine/toolCallStore';
+import { runLegalSearchChain, getFlexibleHierarchy } from '@/lib/search-engine';
 import { adminDb } from '@/services/firebase/admin';
 
 /*─────────────────────────────────────────────────────────────*/
 /*  constants                                                  */
 /*─────────────────────────────────────────────────────────────*/
-const MODEL            = 'gemini-2.0-flash';
-const ITER_LIMIT       = 6;
+const MODEL            = 'gemini-1.5-pro-latest';
+const ITER_LIMIT       = 10;
 const STREAM_CHUNK     = 5;
 const STREAM_DELAY_MS  = 10;
 
@@ -111,7 +110,11 @@ async function execTool(
 {
   /*―――― legalSearchEngine ――――――――――――――――――――――――――――――――*/
   if (call.name === 'legalSearchEngine') {
-    const { query, extractToggle = true } = (call.args as any) ?? {};
+    interface LegalSearchArgs {
+      query?: string;
+      extractToggle?: boolean;
+    }
+    const { query, extractToggle = true } = (call.args as LegalSearchArgs) ?? {};
     if (!query?.trim()) {
       return { functionResponse: { name: call.name, response: { error: 'Missing query' } } };
     }
@@ -134,24 +137,21 @@ async function execTool(
 
   /*―――― gemini_search_results ――――――――――――――――――――――――――*/
   if (call.name === 'gemini_search_results') {
-    const { userRequest = '', toolCallId } = (call.args as any) ?? {};
-    const id   = toolCallId || ctx.lastId;
-    const key  = ctx.lastTitle;
-
-    // ① try specific id → ② fall back to latest extract in convo
-    let lawText = id && key
-      ? await retrieveLawText({ uid: ctx.uid, conversationId: ctx.conversationId, toolCallId: id, key })
-      : null;
-
-    if (!lawText) {
-      // fallback: most recent extract in this conversation
-      const snap = await adminDb
-        .collection('users').doc(ctx.uid)
-        .collection('conversations').doc(ctx.conversationId)
-        .collection('toolCalls')
-        .orderBy('createdAt', 'desc')
-        .limit(1).get();
-      if (!snap.empty) lawText = snap.docs[0].data()?.content || null;
+    interface GeminiResultsArgs {
+      userRequest?: string;
+      toolCallId?: string; 
+    }
+    const { userRequest = '' } = (call.args as GeminiResultsArgs) ?? {};
+    // Always fetch the most recent extracted law text from Firestore
+    let lawText: string | null = null;
+    const snap = await adminDb
+      .collection('users').doc(ctx.uid)
+      .collection('conversations').doc(ctx.conversationId)
+      .collection('toolCalls')
+      .orderBy('createdAt', 'desc')
+      .limit(1).get();
+    if (!snap.empty) {
+      lawText = snap.docs[0].data()?.content || null;
     }
 
     if (!lawText)
@@ -197,6 +197,10 @@ export async function POST(req: NextRequest): Promise<Response> {
   if (body.files && !isFileArr(body.files))
     return NextResponse.json({ error: 'Bad files array' }, { status: 400 });
 
+  // Check if structured JSON response is requested
+  const responseFormat = req.nextUrl.searchParams.get('format');
+  const returnJson = responseFormat === 'json';
+
   const history   = isContentArr(body.history) ? body.history : [];
   const ctx       = { uid: body.uid, conversationId: body.conversationId } as
                     { uid: string; conversationId: string; lastId?: string; lastTitle?: string; };
@@ -221,7 +225,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   for (let turn = 0; turn < ITER_LIMIT; ++turn) {
     const convo = [...history, current];
 
-    /* choose tools: if we haven’t searched yet or user explicitly
+    /* choose tools: if we haven't searched yet or user explicitly
        asks to, expose both; otherwise just the results tool */
     const expose: Tool[] =
       (!ctx.lastId || /\b(search|खोज)\b/i.test(body.message))
@@ -263,24 +267,111 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   /*── stream back answer ────────────────────────────────────*/
   const out = answer ?? '[Error: no response]';
-  const enc = new TextEncoder();
-  const ts  = new TransformStream();
-  const wr  = ts.writable.getWriter();
-
-  (async () => {
-    for (let i = 0; i < out.length; i += STREAM_CHUNK) {
-      await wr.write(enc.encode(out.slice(i, i + STREAM_CHUNK)));
-      if (i + STREAM_CHUNK < out.length)
-        await new Promise(r => setTimeout(r, STREAM_DELAY_MS));
+  
+  if (returnJson) {
+    try {
+      const toolCallId = ctx.lastId || 'unknown';
+      
+      // Use only flexible structured response format
+      const flexibleHierarchy = await getFlexibleHierarchy(
+        ctx.uid,
+        ctx.conversationId,
+        toolCallId,
+        `I've found relevant legal sections related to ${body.message.substring(0, 50)}...`
+      );
+      
+      // Add detailed logging to debug the structure
+      console.log('[API] Received flexibleHierarchy response with structure:', {
+        messageId: flexibleHierarchy?.messageId,
+        conversationId: flexibleHierarchy?.conversationId,
+        documentsExist: Boolean(flexibleHierarchy?.documents),
+        documentsLength: flexibleHierarchy?.documents?.length || 0,
+        documentsList: flexibleHierarchy?.documents?.map(d => ({
+          id: d.documentId,
+          title: d.documentTitle,
+          nodesLength: d.nodes?.length || 0
+        })) || []
+      });
+      
+      // Fix the flexible hierarchy response handling
+      if (flexibleHierarchy && 
+          typeof flexibleHierarchy === 'object' &&
+          'documents' in flexibleHierarchy && 
+          Array.isArray(flexibleHierarchy.documents) && 
+          flexibleHierarchy.documents.length > 0) {
+          
+        console.log(`[API] Using flexible structured response with ${flexibleHierarchy.documents.length} documents`);
+        
+        // Log detailed structure for debugging
+        const hierarchyDetails = {
+          messageId: flexibleHierarchy.messageId,
+          documentCount: flexibleHierarchy.documents.length,
+          documentList: flexibleHierarchy.documents.map(doc => ({
+            id: doc.documentId,
+            title: doc.documentTitle || doc.documentId,
+            nodeCount: doc.nodes?.length || 0
+          }))
+        };
+        console.log('[API] Flexible hierarchy details:', JSON.stringify(hierarchyDetails, null, 2));
+        
+        console.log('[API] Flexible hierarchical response (first 200 chars):', 
+          JSON.stringify(flexibleHierarchy, null, 2).substring(0, 200) + '...');
+        
+        // Return the structured hierarchy response
+        return NextResponse.json(flexibleHierarchy);
+      } else {
+        // More detailed log about why we're falling back
+        console.log('[API] No documents found in flexible hierarchy, returning plain text. Debug info:', {
+          hierarchyExists: Boolean(flexibleHierarchy),
+          isObject: typeof flexibleHierarchy === 'object',
+          hasDocumentsProperty: flexibleHierarchy && 'documents' in flexibleHierarchy,
+          documentsIsArray: flexibleHierarchy && 'documents' in flexibleHierarchy && 
+                          Array.isArray(flexibleHierarchy.documents),
+          documentsLength: flexibleHierarchy && 'documents' in flexibleHierarchy && 
+                         Array.isArray(flexibleHierarchy.documents) ? 
+                         flexibleHierarchy.documents.length : 'N/A'
+        });
+        
+        // Return plain text in JSON format if no hierarchical data
+        return NextResponse.json({
+          message: out,
+          timestamp: new Date().toISOString(), 
+          conversationId: body.conversationId,
+          uid: body.uid
+        });
+      }
+    } catch (err) {
+      console.error('[API] Error creating flexible hierarchy response:', err);
+      // Fallback to plain text response if there's an error
+      return NextResponse.json({
+        message: out,
+        timestamp: new Date().toISOString(), 
+        conversationId: body.conversationId,
+        uid: body.uid,
+        error: (err as Error)?.message
+      });
     }
-    await wr.close();
-  })().catch(async e => { try { await wr.abort(e); } catch {} });
+  } else {
+    // Original streaming text response
+    const enc = new TextEncoder();
+    const ts = new TransformStream();
+    const wr = ts.writable.getWriter();
 
-  return new Response(ts.readable, {
-    headers: {
-      'Content-Type': 'text/plain; charset=utf-8',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive'
-    }
-  });
+    (async () => {
+      for (let i = 0; i < out.length; i += STREAM_CHUNK) {
+        await wr.write(enc.encode(out.slice(i, i + STREAM_CHUNK)));
+        if (i + STREAM_CHUNK < out.length)
+          await new Promise(r => setTimeout(r, STREAM_DELAY_MS));
+      }
+      await wr.close();
+    })().catch(async e => { try { await wr.abort(e); } catch {} });
+
+    return new Response(ts.readable, {
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive'
+      }
+    });
+  }
 }
