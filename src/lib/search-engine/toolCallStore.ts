@@ -1,18 +1,18 @@
 // src/lib/search-engine/toolCallStore.ts
 // Use centralized Firebase Admin SDK initialization
 import { adminDb } from '@/services/firebase/admin';
-import type { CollectionReference, DocumentData } from '@google-cloud/firestore';
 import type { HierarchyNode, DocumentStructureInfo } from "./types";
+import storeHierarchicalNodes from './storeHierarchicalNodes';
 
 // Define batch size limit for Firestore batch operations
 const BATCH_SIZE_LIMIT = 500;
 
 /**
  * Parses the content of a legal search result into structured sections
- * based on PCS (Part-Chapter-Section) identifiers.
+ * based on various hierarchical identifiers (P-C-S, C-S, etc.).
  * 
  * @param content The full text content with multiple sections
- * @returns An object with PCS identifiers as keys and section data as values
+ * @returns An object with section identifiers as keys and section data as values
  */
 export function parseContentSections(content: string): Record<string, { 
   title: string,
@@ -42,7 +42,7 @@ export function parseContentSections(content: string): Record<string, {
     nodeTitles?: Record<string, string>
   }> = {};
   
-  // Try to extract document information
+  // Try to extract document information from the first few lines
   let documentId: string | undefined = undefined;
   let documentTitle: string | undefined = undefined;
   
@@ -71,15 +71,6 @@ export function parseContentSections(content: string): Record<string, {
     }
   }
   
-  // Try to extract the document title if not already found
-  if (!documentTitle && documentId) {
-    const docTitleMatch = content.match(/Document\s+Title:\s*([^\n]+)/i);
-    if (docTitleMatch) {
-      documentTitle = docTitleMatch[1].trim();
-      console.log(`[DEBUG] Found document title: "${documentTitle}"`);
-    }
-  }
-  
   // If still no document ID, try to extract from the first line
   if (!documentId) {
     const firstLine = content.split('\n')[0].trim();
@@ -90,88 +81,149 @@ export function parseContentSections(content: string): Record<string, {
     }
   }
   
-  // Process each section in the content
-  const sectionBlocks = content.split(/\n\n(?=P\d+-C\d+-S\d+|[A-Za-z0-9]+-[A-Za-z0-9]+-[A-Za-z0-9]+)/);
+  // Step 1: Detect the document format (P-C-S, C-S, etc.)
+  const formatPatterns = {
+    pcs: /P\d+-C\d+-S\d+/g,
+    cs: /C\d+-S\d+/g,
+    ps: /P\d+-S\d+/g,
+    article: /ART\d+/g,
+    section: /S\d+/g
+  };
   
-  for (const block of sectionBlocks) {
-    if (!block.trim()) continue;
+  let dominantFormat = 'unknown';
+  let sectionMarkers: RegExpMatchArray | null = null;
+  let maxMatches = 0;
+  
+  // Find which format pattern has the most matches
+  for (const [format, pattern] of Object.entries(formatPatterns)) {
+    const matches = content.match(pattern);
+    const count = matches ? matches.length : 0;
     
-    // Extract the section identifier (e.g., P4-C6-S325)
-    const idMatch = block.match(/^(P\d+-C\d+-S\d+|[A-Za-z0-9]+-[A-Za-z0-9]+-[A-Za-z0-9]+)/);
-    if (!idMatch) continue;
+    if (count > maxMatches) {
+      maxMatches = count;
+      dominantFormat = format;
+      sectionMarkers = matches;
+    }
+  }
+  
+  console.log(`[DEBUG] Detected dominant format: ${dominantFormat} with ${maxMatches} matches`);
+  
+  // If we couldn't find any section markers, return empty
+  if (!sectionMarkers || maxMatches === 0) {
+    console.log("[DEBUG] No section markers found in content");
+    return sections;
+  }
+  
+  // Step 2: Extract each section based on the detected format
+  // Get unique section IDs (in case there are duplicates)
+  const uniqueSectionIds = Array.from(new Set(sectionMarkers));
+  console.log(`[DEBUG] Found ${uniqueSectionIds.length} unique section IDs`);
+  
+  // Step 3: Extract the content for each section
+  // For each section ID, find its position and the position of the next section ID
+  const positions = [];
+  
+  for (const sectionId of uniqueSectionIds) {
+    // Find all occurrences of this section ID in the content
+    const startPos = content.indexOf(sectionId);
     
-    const sectionId = idMatch[1];
-    console.log(`[DEBUG] Processing section ${sectionId}`);
+    // There might be multiple occurrences of the same ID, so only use the first
+    if (startPos !== -1) {
+      positions.push({
+        id: sectionId,
+        start: startPos
+      });
+    }
+  }
+  
+  // Sort positions by their starting position in the document
+  positions.sort((a, b) => a.start - b.start);
+  
+  // Extract each section's content
+  for (let i = 0; i < positions.length; i++) {
+    const current = positions[i];
+    // The end is either the start of the next section or the end of the content
+    const next = i < positions.length - 1 ? positions[i + 1] : null;
     
-    // Extract hierarchical components from ID
-    const pcsMatch = sectionId.match(/P(\d+)-C(\d+)-S(\d+)/);
-    const partNumber = pcsMatch ? pcsMatch[1] : undefined;
-    const chapterNumber = pcsMatch ? pcsMatch[2] : undefined;
-    const sectionNumber = pcsMatch ? pcsMatch[3] : undefined;
+    // Calculate the end position of the current section
+    const endPos = next ? next.start : content.length;
     
-    // Extract node titles from the block - only structural metadata
+    // Extract the section content
+    const sectionContent = content.substring(current.start, endPos).trim();
+    
+    // Process the section content to extract metadata
+    const lines = sectionContent.split('\n');
+    const sectionId = current.id;
+    
+    // Extract title information
     const nodeTitles: Record<string, string> = {};
     
-    // Parse Part title
-    const partMatch = block.match(/Part:?\s+([^\n,]+)/);
-    if (partMatch) {
-      nodeTitles['partTitle'] = partMatch[1].trim();
-    }
-    
-    // Parse Chapter title
-    const chapterMatch = block.match(/Chapter:?\s+([^\n,]+)/);
-    if (chapterMatch) {
-      nodeTitles['chapterTitle'] = chapterMatch[1].trim();
-    }
-    
-    // Parse Section title
-    const sectionMatch = block.match(/Section:?\s+([^\n,]+)/);
-    if (sectionMatch) {
-      nodeTitles['sectionTitle'] = sectionMatch[1].trim();
-    }
-    
-    // Extract Subsection titles (still part of structure)
-    const subsectionMatches = Array.from(block.matchAll(/Subsection\s*\(([^)]+)\):?\s*([^\n,]+)/g));
-    for (const subMatch of subsectionMatches) {
-      nodeTitles[`subsection${subMatch[1]}Title`] = subMatch[2].trim();
-    }
-    
-    // Extract the actual content - look for the "Content:" marker specifically
-    let actualContent = '';
-    const contentMatch = block.match(/Content:?\s+([\s\S]+)$/);
-    if (contentMatch) {
-      actualContent = contentMatch[1].trim();
-    } else {
-      // Fallback: If no Content marker, use everything after the last identified section marker
-      const lastMarkerPos = Math.max(
-        block.lastIndexOf('Part:'),
-        block.lastIndexOf('Chapter:'),
-        block.lastIndexOf('Section:')
-      );
+    // Look for Chapter: and Section: in the first few lines
+    for (let j = 0; j < Math.min(10, lines.length); j++) {
+      const line = lines[j];
       
-      if (lastMarkerPos > 0) {
-        // Find the next newline after the last marker
-        const nextNewline = block.indexOf('\n', lastMarkerPos);
-        if (nextNewline > 0) {
-          actualContent = block.substring(nextNewline).trim();
-        } else {
-          // If no newline found, just use everything after the last marker position
-          actualContent = block.substring(lastMarkerPos).trim();
-        }
-      } else {
-        // If no markers found, just use the whole block as content (excluding the ID)
-        actualContent = block.substring(idMatch[0].length).trim();
+      if (line.startsWith('Chapter:')) {
+        nodeTitles['chapterTitle'] = line.substring('Chapter:'.length).trim();
+      } else if (line.match(/^Chapter:\s/)) {
+        nodeTitles['chapterTitle'] = line.substring(line.indexOf(':') + 1).trim();
+      } else if (line.startsWith('Section:')) {
+        nodeTitles['sectionTitle'] = line.substring('Section:'.length).trim();
+      } else if (line.match(/^Section:\s/)) {
+        nodeTitles['sectionTitle'] = line.substring(line.indexOf(':') + 1).trim();
+      } else if (line.startsWith('Part:')) {
+        nodeTitles['partTitle'] = line.substring('Part:'.length).trim();
+      } else if (line.match(/^Part:\s/)) {
+        nodeTitles['partTitle'] = line.substring(line.indexOf(':') + 1).trim();
       }
     }
     
-    // Use extracted section title as the main title, or fallback to ID
-    const title = nodeTitles['sectionTitle'] || sectionId;
+    // Extract part/chapter/section numbers based on format
+    let partNumber: string | undefined;
+    let chapterNumber: string | undefined;
+    let sectionNumber: string | undefined;
     
+    if (dominantFormat === 'pcs') {
+      const match = sectionId.match(/P(\d+)-C(\d+)-S(\d+)/);
+      if (match) {
+        partNumber = match[1];
+        chapterNumber = match[2];
+        sectionNumber = match[3];
+      }
+    } else if (dominantFormat === 'cs') {
+      const match = sectionId.match(/C(\d+)-S(\d+)/);
+      if (match) {
+        chapterNumber = match[1];
+        sectionNumber = match[2];
+      }
+    } else if (dominantFormat === 'ps') {
+      const match = sectionId.match(/P(\d+)-S(\d+)/);
+      if (match) {
+        partNumber = match[1];
+        sectionNumber = match[2];
+      }
+    } else if (dominantFormat === 'article') {
+      const match = sectionId.match(/ART(\d+)/);
+      if (match) {
+        sectionNumber = match[1];
+      }
+    } else if (dominantFormat === 'section') {
+      const match = sectionId.match(/S(\d+)/);
+      if (match) {
+        sectionNumber = match[1];
+      }
+    }
+    
+    // Set the section title
+    const title = nodeTitles['sectionTitle'] || 
+                nodeTitles['articleTitle'] || 
+                sectionId;
+    
+    // Store the section
     sections[sectionId] = {
       title,
-      content: actualContent,
-      documentId,    // Apply the document ID to each section
-      documentTitle, // Apply the document title to each section
+      content: sectionContent,
+      documentId,
+      documentTitle,
       partNumber,
       chapterNumber,
       sectionNumber,
@@ -182,12 +234,6 @@ export function parseContentSections(content: string): Record<string, {
     };
     
     console.log(`[DEBUG] Extracted section ${sectionId} with title: ${title}`);
-  }
-  
-  // If no sections were found with the block parser, try other parsing methods
-  if (Object.keys(sections).length === 0) {
-    console.log("[DEBUG] No sections found with block parser, trying direct PCS format");
-    // ... existing fallback parsing code can stay here ...
   }
   
   console.log(`[DEBUG] Parsed ${Object.keys(sections).length} sections`);
@@ -525,138 +571,6 @@ export async function saveToolCallWithCounters({
   }
   
   return finalSectionsMap;
-}
-
-/**
- * Store section nodes - simplified to only store leaf nodes
- * Creates a flat structure directly under document files with just the innermost children (leaf nodes)
- * Now includes content directly with each node instead of using content hash references
- */
-async function storeHierarchicalNodes(
-  nodesCollection: CollectionReference<DocumentData>, // the Firestore collection ref for nodes
-  sectionIds: string[],
-  sectionsMap: Record<string, {
-    title: string,
-    content: string,
-    documentId?: string,
-    documentTitle?: string,
-    partNumber?: string,
-    chapterNumber?: string,
-    sectionNumber?: string,
-    partTitle?: string,
-    chapterTitle?: string,
-    sectionTitle?: string,
-    nodeTitles?: Record<string, string>
-  }>
-): Promise<void> {
-  let batchOp = adminDb.batch();
-  let batchCount = 0;
-  
-  // Get document structure to identify hierarchy levels
-  const documentStructure = detectDocumentStructure(sectionIds);
-  
-  // Store the leaf nodes with all their metadata
-  for (const sectionId of sectionIds) {
-    const sectionData = sectionsMap[sectionId];
-    if (!sectionData) continue;
-    
-    // Parse the section ID to extract hierarchy components
-    const components = parseHierarchicalId(sectionId, documentStructure);
-    
-    // Create metadata object - only include structural information, not content
-    const metadata: Record<string, unknown> = {};
-    
-    // Add basic document information
-    if (sectionData.documentId) metadata.documentId = sectionData.documentId;
-    if (sectionData.documentTitle) metadata.documentTitle = sectionData.documentTitle;
-    
-    // Add standard hierarchical components without duplication
-    if (sectionData.partNumber) {
-      metadata.partNumber = sectionData.partNumber;
-      // We don't need to store both partNumber and part, which has the same information
-      // metadata.part = `P${sectionData.partNumber}`;
-    }
-    
-    if (sectionData.chapterNumber) {
-      metadata.chapterNumber = sectionData.chapterNumber;
-      // metadata.chapter = `C${sectionData.chapterNumber}`;
-    }
-    
-    if (sectionData.sectionNumber) {
-      metadata.sectionNumber = sectionData.sectionNumber;
-      // metadata.section = `S${sectionData.sectionNumber}`;
-    }
-    
-    // Add titles for hierarchical nodes - this is important metadata
-    if (sectionData.partTitle) metadata.partTitle = sectionData.partTitle;
-    if (sectionData.chapterTitle) metadata.chapterTitle = sectionData.chapterTitle;
-    if (sectionData.sectionTitle) metadata.sectionTitle = sectionData.sectionTitle;
-    
-    // Only add node titles for structure elements, not content elements
-    if (sectionData.nodeTitles) {
-      // Filter out content-related keys (Clause content)
-      Object.entries(sectionData.nodeTitles).forEach(([key, value]) => {
-        // Only add structural titles, skip content items like clauses
-        if (key.startsWith('partTitle') || 
-            key.startsWith('chapterTitle') || 
-            key.startsWith('sectionTitle') || 
-            key.startsWith('subsectionTitle')) {
-          metadata[key] = value;
-        }
-      });
-    }
-    
-    // Create the node data for the section
-    const nodeData = {
-      nodeId: sectionId,
-      nodeType: 'section',
-      nodeTitle: sectionData.title || sectionId,
-      content: sectionData.content, // Store just the actual content
-      createdAt: new Date(),
-      hierarchyPath: components, // Store the full path as an array
-      metadata
-    };
-    
-    // Store the node
-    const nodeRef = nodesCollection.doc(sectionId);
-    batchOp.set(nodeRef, nodeData);
-    batchCount++;
-    
-    // Commit batch if reaching limit
-    if (batchCount >= BATCH_SIZE_LIMIT) {
-      await batchOp.commit();
-      batchOp = adminDb.batch();
-      batchCount = 0;
-    }
-  }
-  
-  // Commit any remaining batch operations
-  if (batchCount > 0) {
-    await batchOp.commit();
-  }
-}
-
-/**
- * Parses a section ID into its hierarchical components based on document structure
- */
-function parseHierarchicalId(sectionId: string, structure: DocumentStructureInfo): string[] {
-  const { levelSeparator, levelPrefixes } = structure;
-  
-  // Split the ID by the separator
-  if (sectionId.includes(levelSeparator)) {
-    return sectionId.split(levelSeparator);
-  }
-  
-  // Handle single-level IDs
-  // Try to extract the prefix and number
-  for (const [, prefix] of Object.entries(levelPrefixes)) {
-    if (sectionId.startsWith(prefix)) {
-      return [sectionId];
-    }
-  }
-  
-  // Default: return the ID as a single component
-  return [sectionId];
 }
 
 /**
