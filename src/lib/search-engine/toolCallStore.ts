@@ -148,11 +148,11 @@ export function parseContentSections(content: string): Record<string, {
     // Calculate the end position of the current section
     const endPos = next ? next.start : content.length;
     
-    // Extract the section content
-    const sectionContent = content.substring(current.start, endPos).trim();
+    // Extract the section content (full text including metadata)
+    const sectionFullText = content.substring(current.start, endPos).trim();
     
     // Process the section content to extract metadata
-    const lines = sectionContent.split('\n');
+    const lines = sectionFullText.split('\n');
     const sectionId = current.id;
     
     // Extract title information
@@ -174,6 +174,62 @@ export function parseContentSections(content: string): Record<string, {
         nodeTitles['partTitle'] = line.substring('Part:'.length).trim();
       } else if (line.match(/^Part:\s/)) {
         nodeTitles['partTitle'] = line.substring(line.indexOf(':') + 1).trim();
+      }
+    }
+    
+    // Extract the actual content without metadata
+    // First look for a "Content:" marker
+    let actualContent = '';
+    
+    // Method 1: Look for "Content:" marker
+    const contentMarker = sectionFullText.indexOf('Content:');
+    if (contentMarker !== -1) {
+      // Extract everything after "Content:" marker
+      actualContent = sectionFullText.substring(contentMarker + 'Content:'.length).trim();
+    } else {
+      // Method 2: Try to find where metadata ends and content begins
+      // This assumes content starts after all the metadata lines
+      let contentStartLine = 0;
+      
+      // Skip the section ID line
+      contentStartLine++;
+      
+      // Skip empty lines
+      while (contentStartLine < lines.length && lines[contentStartLine].trim() === '') {
+        contentStartLine++;
+      }
+      
+      // Skip Chapter: line if present
+      if (contentStartLine < lines.length && 
+          (lines[contentStartLine].startsWith('Chapter:') || 
+           lines[contentStartLine].match(/^Chapter:\s/))) {
+        contentStartLine++;
+      }
+      
+      // Skip empty lines
+      while (contentStartLine < lines.length && lines[contentStartLine].trim() === '') {
+        contentStartLine++;
+      }
+      
+      // Skip Section: line if present
+      if (contentStartLine < lines.length && 
+          (lines[contentStartLine].startsWith('Section:') || 
+           lines[contentStartLine].match(/^Section:\s/))) {
+        contentStartLine++;
+      }
+      
+      // Skip empty lines
+      while (contentStartLine < lines.length && lines[contentStartLine].trim() === '') {
+        contentStartLine++;
+      }
+      
+      // The rest is content
+      if (contentStartLine < lines.length) {
+        actualContent = lines.slice(contentStartLine).join('\n').trim();
+      } else {
+        // Fallback: just use the original section text
+        console.log(`[DEBUG] Could not extract content for section ${sectionId}, using full text`);
+        actualContent = sectionFullText;
       }
     }
     
@@ -218,10 +274,10 @@ export function parseContentSections(content: string): Record<string, {
                 nodeTitles['articleTitle'] || 
                 sectionId;
     
-    // Store the section
+    // Store the section - now with only the actual content in the content field
     sections[sectionId] = {
       title,
-      content: sectionContent,
+      content: actualContent,
       documentId,
       documentTitle,
       partNumber,
