@@ -10,6 +10,8 @@ interface SearchWidgetProps {
   triggerId: string;
 }
 
+// Alias custom element to satisfy TypeScript
+const GenSearchWidget: any = 'gen-search-widget';
 const SearchWidget: React.FC<SearchWidgetProps> = ({ configId, triggerId }) => {
   return (
     <>
@@ -26,7 +28,7 @@ const SearchWidget: React.FC<SearchWidgetProps> = ({ configId, triggerId }) => {
         style={{ display: 'none' }}
       />
       {/* Search widget component (overlay) */}
-      <gen-search-widget configId={configId} triggerId={triggerId}></gen-search-widget>
+      <GenSearchWidget configId={configId} triggerId={triggerId}></GenSearchWidget>
     </>
   );
 };

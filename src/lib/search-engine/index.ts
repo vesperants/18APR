@@ -12,7 +12,9 @@ import type {
   FlexibleHierarchicalResponse,
   HierarchyNode,
   DocumentHierarchy,
-  DocumentStructureInfo
+  DocumentStructureInfo,
+  SectionTitlesRetrievalParams,
+  SectionTextRetrievalParams
 } from "./types";
 import { DEBUG } from "./config";
 import { saveToolCallWithCounters } from "./toolCallStore";
@@ -121,4 +123,62 @@ export async function runLegalSearchChain({
       error: (err as Error)?.message || "Unknown error"
     };
   }
+}
+// --- Stubbed legacy exports to satisfy existing API routes ---
+/**
+ * Retrieves full sections for a tool call (legacy stub).
+ */
+export async function getSectionsForToolCall(
+  uid: string,
+  conversationId: string,
+  toolCallId: string
+): Promise<any[]> {
+  return [];
+}
+
+/**
+ * Retrieves section titles for a conversation (legacy stub).
+ */
+export async function retrieveSectionTitles(
+  params: SectionTitlesRetrievalParams
+): Promise<Record<string, string>> {
+  return {};
+}
+
+/**
+ * Retrieves text for a specific section (legacy stub).
+ */
+export async function retrieveSectionText(
+  params: SectionTextRetrievalParams
+): Promise<string | null> {
+  return null;
+}
+
+/**
+ * Retrieves all section contents for a tool call (legacy stub).
+ */
+export async function getAllSectionsContent(
+  uid: string,
+  conversationId: string,
+  toolCallId: string
+): Promise<Record<string, any>> {
+  return {};
+}
+
+/**
+ * Retrieves hierarchical section titles for a tool call (legacy stub).
+ */
+export async function getHierarchicalSectionTitles(
+  uid: string,
+  conversationId: string,
+  toolCallId: string,
+  message?: string
+): Promise<HierarchicalTitlesResponse> {
+  return {
+    messageId: `msg_${Date.now()}`,
+    conversationId,
+    toolCallId,
+    message: message || '',
+    files: []
+  } as HierarchicalTitlesResponse;
 }

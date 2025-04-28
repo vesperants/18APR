@@ -91,6 +91,7 @@ export const translations = {
   
     // --- Chat Page ---
     chatTitle: { ne: 'भेस्प च्याट', en: 'Vesp Chat' },
+    najirSearchTooltip: { ne: 'नाजिर खोजी', en: 'Najir search' },
     backButton: { ne: 'पछाडि', en: 'Back' },
     startConversation: { ne: 'कुराकानी सुरु गर्नुहोस्!', en: 'Start a conversation!' },
     typeMessage: { ne: 'आफ्नो सन्देश टाइप गर्नुहोस्...', en: 'Type your message...' },

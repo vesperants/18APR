@@ -49,7 +49,8 @@ export async function GET(req: NextRequest): Promise<Response> {
     console.log(`Retrieving section titles for conversation: ${conversationId}`);
     
     // Get all section titles for this conversation
-    const titles = await retrieveSectionTitles(uid, conversationId);
+    // retrieveSectionTitles expects a single object parameter
+    const titles = await retrieveSectionTitles({ uid, conversationId });
     
     return NextResponse.json({
       titles,

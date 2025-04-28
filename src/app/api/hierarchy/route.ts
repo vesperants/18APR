@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getFlexibleHierarchy } from '@/lib/search-engine/hierarchyStore';
-import { adminDb } from '@/lib/firebase/admin';
+import { adminDb } from '@/services/firebase/admin';
 
 /**
  * GET endpoint for retrieving a flexible hierarchical structure

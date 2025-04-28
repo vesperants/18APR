@@ -36,22 +36,40 @@ export async function getLawSectionsStats(uid: string, conversationId: string) {
 }
 
 /**
+ * Result of simpleParseSections, including section data and debug info
+ */
+export interface SimpleParseSectionsResult {
+  /** Number of sections parsed */
+  count: number;
+  /** Parsed section identifiers */
+  sectionIds: string[];
+  /** Debug information about parsing */
+  debug: {
+    /** Matched PCS identifiers in the content */
+    pcsMatches: string[];
+    /** Number of text blocks split for parsing */
+    blocksCount: number;
+  };
+  /** Mapping of section ID to its title and content */
+  sections: Record<string, { title: string; content: string }>;
+}
+/**
  * Simplified section parsing for debugging
  */
-export function simpleParseSections(content: string): Record<string, { title: string, content: string }> {
+export function simpleParseSections(content: string): SimpleParseSectionsResult {
   console.log("[DEBUG-SIMPLE] Content length:", content.length);
   console.log("[DEBUG-SIMPLE] Content preview:", content.substring(0, 200) + "...");
   
-  const result: Record<string, { title: string, content: string }> = {};
+  const result: Record<string, { title: string; content: string }> = {};
   
   // Simple regex to match P-C-S patterns and extract sections
-  const pcsMatches = content.match(/\b(P\d+-C\d+-S\d+)\b/g) || [];
+  const pcsMatches: string[] = content.match(/\b(P\d+-C\d+-S\d+)\b/g) || [];
   
   // For debugging
   console.log("[DEBUG-SIMPLE] Found PCS matches:", pcsMatches);
   
   // Process the document and extract sections
-  const blocks = content.split(/\n\n(?=P\d+-C\d+-S\d+)/);
+  const blocks: string[] = content.split(/\n\n(?=P\d+-C\d+-S\d+)/);
   
   // Simplified solution: split by double newlines and look for PCS identifiers
   for (const block of blocks) {
@@ -73,7 +91,20 @@ export function simpleParseSections(content: string): Record<string, { title: st
   
   console.log("[DEBUG-SIMPLE] Extracted section count:", Object.keys(result).length);
   
-  return result;
+  // Prepare structured result
+  const sectionIds = Object.keys(result);
+  const count = sectionIds.length;
+  const debugInfo = {
+    pcsMatches,
+    blocksCount: blocks.length,
+  };
+  
+  return {
+    count,
+    sectionIds,
+    debug: debugInfo,
+    sections: result,
+  };
 }
 
 /**
