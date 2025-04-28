@@ -3,6 +3,7 @@ import styles from './ChatHeader.module.css';
 import Image from 'next/image';
 import { useLanguage } from '@/context/LanguageContext';
 import { translations } from '@/constants/translations';
+// Removed unused Link import now that header no longer contains navigation link
 
 interface ChatHeaderProps {
   onProfileClick: () => void;
@@ -47,6 +48,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
         <span>{title}</span>
       </h1>
       <div className={styles.rightSection}>
+        {/* Render any children (e.g., custom buttons) */}
         {children}
         {onProfileClick && (
           <button

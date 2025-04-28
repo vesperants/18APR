@@ -26,6 +26,8 @@ import {
   updateConversationTitle,
 } from '@/services/firebase/conversation';
 import styles from './chat.module.css';
+import headerStyles from '@/components/ChatHeader.module.css';
+import SearchWidget from '@/components/SearchWidget';
 
 // --- Types ---
 type ConversationListItem = { id: string; title: string };
@@ -1286,11 +1288,20 @@ export default function ChatClient() {
         onDeleteConversation={handleDeleteConversation}
         onRenameConversation={handleRenameConversation}
       />
-      <div style={{
-        display: 'flex', height: '100vh', width: '100vw', overflow: 'hidden'
-      }}>
         <div style={{
-          flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', backgroundColor: '#fff', position: 'relative'
+          display: 'flex',
+          height: '100vh',
+          width: '100vw',
+          overflow: 'hidden'
+        }}>
+        <div style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          height: '100%',
+          overflow: 'hidden',
+          backgroundColor: '#fff',
+          position: 'relative'
         }}>
           <ChatHeader
             onProfileClick={() => setAccountMenuOpen(open => !open)}
@@ -1299,7 +1310,18 @@ export default function ChatClient() {
             onToggleShelfClick={() => setIsShelfOpen(prev => !prev)}
             isShelfOpen={isShelfOpen}
             avatarButtonRef={avatarButtonRef}
-          />
+          >
+            <button
+              type="button"
+              className={headerStyles.headerButton}
+              onClick={() => document.getElementById('najir-widget-trigger')?.click()}
+              title={translations.najirSearchTooltip?.[language] || 'Najir search'}
+              aria-label={translations.najirSearchTooltip?.[language] || 'Najir search'}
+              style={{ marginRight: 12 }}
+            >
+              Najir
+            </button>
+          </ChatHeader>
           <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
             {/* Initial greeting overlay (centered) */}
             <div style={{
@@ -1365,6 +1387,8 @@ export default function ChatClient() {
           </div>
         </div>
       </div>
+      {/* Mount the SearchWidget trigger and overlay once */}
+      <SearchWidget configId="c0940e50-6ef3-4de2-a320-754d3e416f6c" triggerId="najir-widget-trigger" />
     </>
   );
 }
